@@ -1,3 +1,24 @@
+import TravelForm from "@/components/TravelForm";
+
+export default function Home() {
+  return (
+    <div className="min-h-screen bg-slate-50 py-20 px-4">
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center mb-12">
+          <h1 className="text-5xl font-extrabold text-slate-900 mb-4 tracking-tight">
+            AI 旅遊規劃師
+          </h1>
+          <p className="text-lg text-slate-500">
+            您的私人導遊，只需幾秒鐘即可為您量身打造完美行程。
+          </p>
+        </div>
+        
+        <TravelForm />
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   return (
     <main style={{ 
