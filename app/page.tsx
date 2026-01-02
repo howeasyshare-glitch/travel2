@@ -2,9 +2,9 @@ import TravelForm from "@/components/TravelForm";
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-slate-50 py-12 px-4">
+    <main className="min-h-screen bg-slate-50 py-20 px-4">
       <div className="max-w-4xl mx-auto">
-        {/* 標題區塊 */}
+        {/* 網站標題 */}
         <div className="text-center mb-12">
           <h1 className="text-5xl font-extrabold text-slate-900 mb-4 tracking-tight">
             🌏 AI 旅遊規劃師
@@ -14,12 +14,12 @@ export default function Home() {
           </p>
         </div>
         
-        {/* 核心表單組件 */}
+        {/* 多步驟表單組件 */}
         <TravelForm />
         
-        {/* 頁尾小提示 */}
-        <footer className="mt-12 text-center text-slate-400 text-sm">
-          Powered by Gemini AI & Next.js
+        {/* 底部裝飾 */}
+        <footer className="mt-12 text-center text-slate-400 text-sm italic">
+          Powered by Gemini AI
         </footer>
       </div>
     </main>
