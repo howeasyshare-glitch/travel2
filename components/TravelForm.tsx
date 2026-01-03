@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { MapPin, Calendar, Users, Wallet, Sparkles, ArrowRight, ArrowLeft } from "lucide-react";
+import { MapPin, Calendar, Users, Wallet, Sparkles, ArrowRight, ArrowLeft, Loader2 } from "lucide-react";
 
 export default function TravelForm() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null); // 儲存 AI 回傳結果
   const [formData, setFormData] = useState({
     location: "",
     days: "3",
@@ -19,35 +20,31 @@ export default function TravelForm() {
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      // 1. 呼叫我們之前寫好的 API 路由
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
 
-      if (!response.ok) throw new Error("AI 生成失敗");
+      if (!response.ok) throw new Error("生成失敗");
 
       const data = await response.json();
-      
-      // 2. 儲存 AI 回傳的結果並跳轉到結果頁
-      setResult(data); 
-      setStep(4);
+      setResult(data);
+      setStep(4); // 顯示結果頁面
     } catch (error) {
       console.error(error);
-      alert("抱歉，AI 暫時連不上，請檢查 Vercel 的 API Key 設定！");
+      alert("AI 規劃失敗，請確認 API Key 是否設定正確。");
     } finally {
       setLoading(false);
     }
   };
 
-
   return (
-    <div className="max-w-xl mx-auto bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
+    <div className="max-w-2xl mx-auto bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100">
       {/* 進度條 */}
-      <div className="bg-slate-50 h-2 flex">
+      <div className="bg-slate-100 h-2 flex">
         <div 
-          className="bg-blue-500 transition-all duration-500" 
+          className="bg-blue-600 transition-all duration-500" 
           style={{ width: `${(step / 3) * 100}%` }}
         />
       </div>
@@ -55,15 +52,15 @@ export default function TravelForm() {
       <div className="p-8">
         {/* 步驟 1: 地點 */}
         {step === 1 && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+          <div className="space-y-6">
             <div className="flex items-center gap-3 text-blue-600">
               <MapPin size={28} />
               <h2 className="text-2xl font-bold text-slate-800">你想去哪裡？</h2>
             </div>
             <input 
               type="text"
-              placeholder="例如：日本東京、法國巴黎..."
-              className="w-full text-lg p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl focus:border-blue-500 focus:outline-none transition-all"
+              placeholder="例如：京都、倫敦、台東..."
+              className="w-full text-lg p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:border-blue-500 focus:outline-none"
               value={formData.location}
               onChange={(e) => setFormData({...formData, location: e.target.value})}
             />
@@ -77,70 +74,91 @@ export default function TravelForm() {
           </div>
         )}
 
-        {/* 步驟 2: 時間與人數 */}
+        {/* 步驟 2: 細節 */}
         {step === 2 && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+          <div className="space-y-6">
             <div className="flex items-center gap-3 text-green-600">
               <Calendar size={28} />
               <h2 className="text-2xl font-bold text-slate-800">規劃細節</h2>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-500 flex items-center gap-1">
-                  <Calendar size={14} /> 天數
-                </label>
+                <label className="text-sm font-medium text-slate-500">天數</label>
                 <input 
                   type="number"
-                  className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl"
+                  className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl"
                   value={formData.days}
                   onChange={(e) => setFormData({...formData, days: e.target.value})}
                 />
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-500 flex items-center gap-1">
-                  <Users size={14} /> 人數
-                </label>
+                <label className="text-sm font-medium text-slate-500">人數</label>
                 <input 
                   type="number"
-                  className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl"
+                  className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl"
                   value={formData.members}
                   onChange={(e) => setFormData({...formData, members: e.target.value})}
                 />
               </div>
             </div>
             <div className="flex gap-3">
-              <button onClick={prevStep} className="flex-1 py-4 border-2 border-slate-100 rounded-2xl font-bold text-slate-400">返回</button>
-              <button onClick={nextStep} className="flex-2 py-4 bg-blue-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2 flex-[2]">下一步</button>
+              <button onClick={prevStep} className="flex-1 py-4 border-2 border-slate-200 rounded-2xl font-bold">返回</button>
+              <button onClick={nextStep} className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-bold">下一步</button>
             </div>
           </div>
         )}
 
-        {/* 步驟 3: 預算與確認 */}
+        {/* 步驟 3: 預算與生成 */}
         {step === 3 && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
+          <div className="space-y-6">
             <div className="flex items-center gap-3 text-amber-500">
               <Wallet size={28} />
-              <h2 className="text-2xl font-bold text-slate-800">最後確認</h2>
+              <h2 className="text-2xl font-bold text-slate-800">預算等級</h2>
             </div>
             <select 
-              className="w-full p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl appearance-none"
+              className="w-full p-4 bg-slate-50 border-2 border-slate-200 rounded-2xl appearance-none"
               value={formData.budget}
               onChange={(e) => setFormData({...formData, budget: e.target.value})}
             >
-              <option value="經濟">小資經濟 (重視性價比)</option>
-              <option value="中等">標準舒適 (平衡預算與體驗)</option>
-              <option value="奢華">高端奢華 (追求頂級享受)</option>
+              <option value="經濟">小資經濟</option>
+              <option value="中等">標準舒適</option>
+              <option value="奢華">高端奢華</option>
             </select>
             <div className="flex gap-3">
-              <button onClick={prevStep} className="flex-1 py-4 border-2 border-slate-100 rounded-2xl font-bold text-slate-400">返回</button>
+              <button onClick={prevStep} className="flex-1 py-4 border-2 border-slate-200 rounded-2xl font-bold">返回</button>
               <button 
                 onClick={handleSubmit}
                 disabled={loading}
-                className="flex-[2] py-4 bg-black text-white rounded-2xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-all"
+                className="flex-[2] py-4 bg-black text-white rounded-2xl font-bold flex items-center justify-center gap-2"
               >
-                {loading ? "AI 正在思考中..." : <><Sparkles size={20} /> 開始生成行程</>}
+                {loading ? <Loader2 className="animate-spin" /> : <Sparkles size={20} />}
+                {loading ? "AI 正在規劃中..." : "開始生成行程"}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* 步驟 4: 顯示結果 */}
+        {step === 4 && result && (
+          <div className="space-y-8 animate-in fade-in zoom-in-95">
+            <div className="text-center border-b pb-6">
+              <h2 className="text-3xl font-black text-slate-900">{result.title}</h2>
+              <p className="text-slate-500 mt-2">{result.summary}</p>
+            </div>
+            <div className="space-y-6">
+              {result.days.map((item: any, i: number) => (
+                <div key={i} className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
+                  <h3 className="font-bold text-blue-600 mb-2">第 {item.day} 天</h3>
+                  <p className="text-slate-700 whitespace-pre-line leading-relaxed">{item.plan}</p>
+                </div>
+              ))}
+            </div>
+            <button 
+              onClick={() => {setStep(1); setResult(null);}}
+              className="w-full py-4 border-2 border-slate-900 rounded-2xl font-bold hover:bg-slate-900 hover:text-white transition-all"
+            >
+              重新規劃
+            </button>
           </div>
         )}
       </div>
