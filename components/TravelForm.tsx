@@ -18,13 +18,29 @@ export default function TravelForm() {
 
   const handleSubmit = async () => {
     setLoading(true);
-    // 這裡之後會串接我們寫好的 /api/generate
-    console.log("送出資料:", formData);
-    setTimeout(() => {
+    try {
+      // 1. 呼叫我們之前寫好的 API 路由
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) throw new Error("AI 生成失敗");
+
+      const data = await response.json();
+      
+      // 2. 儲存 AI 回傳的結果並跳轉到結果頁
+      setResult(data); 
+      setStep(4);
+    } catch (error) {
+      console.error(error);
+      alert("抱歉，AI 暫時連不上，請檢查 Vercel 的 API Key 設定！");
+    } finally {
       setLoading(false);
-      alert("AI 正在規劃中...（這是模擬功能）");
-    }, 2000);
+    }
   };
+
 
   return (
     <div className="max-w-xl mx-auto bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
