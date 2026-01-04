@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
@@ -7,48 +6,42 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "缺少 API Key" }, { status: 500 });
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-
   try {
     const { location, days, members, budget } = await req.json();
-    
-    // 嘗試不同的模型名稱順序，解決 404 問題
-    const modelNames = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"];
-    let lastError = null;
 
-    for (const name of modelNames) {
-      try {
-        console.log(`📡 嘗試使用模型: ${name}`);
-        const model = genAI.getGenerativeModel({ model: name });
-        
-        const prompt = `你是一位旅遊規劃師。請為我規劃 ${location} ${days}天 ${members}人的 ${budget} 旅程。
-        請務必只回傳純 JSON 格式（不要 Markdown 標籤）：
-        {
-          "title": "標題",
-          "summary": "簡介",
-          "days": [{ "day": 1, "plan": "行程" }]
-        }`;
+    // 直接呼叫 Google 的 REST API 路徑
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-        const result = await model.generateContent(prompt);
-        const text = result.response.text();
-        const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
-        
-        return NextResponse.json(JSON.parse(cleanJson));
-        
-      } catch (err: any) {
-        console.warn(`❌ 模型 ${name} 失敗: ${err.message}`);
-        lastError = err;
-        continue; // 嘗試下一個模型
-      }
+    const prompt = `你是一位旅遊規劃師。請規劃去 ${location} ${days}天 ${members}人的 ${budget} 旅程。
+    請務必只回傳純 JSON 格式（不要 Markdown 標籤）：
+    {
+      "title": "標題",
+      "summary": "簡介",
+      "days": [{ "day": 1, "plan": "行程" }]
+    }`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" }
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Google API 錯誤回傳:", data);
+      throw new Error(data.error?.message || "Google API 呼叫失敗");
     }
 
-    throw lastError; // 如果全部都失敗，拋出最後一個錯誤
+    // 解析 Google 回傳的格式
+    const aiText = data.candidates[0].content.parts[0].text;
+    return NextResponse.json(JSON.parse(aiText));
 
   } catch (error: any) {
-    console.error("終極錯誤日誌:", error);
-    return NextResponse.json({ 
-      error: "所有 AI 模型均無法呼叫", 
-      details: error.message 
-    }, { status: 500 });
+    console.error("最終診斷錯誤:", error.message);
+    return NextResponse.json({ error: "AI 生成失敗", details: error.message }, { status: 500 });
   }
 }
