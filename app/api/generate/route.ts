@@ -1,23 +1,21 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
-// 1. 初始化，並加入錯誤檢查
-const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-const genAI = new GoogleGenerativeAI(apiKey || "");
-
 export async function POST(req: Request) {
+  // 1. 取得 API Key 並檢查
+  const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  
+  if (!apiKey) {
+    console.error("❌ 錯誤: 找不到 GOOGLE_GENERATIVE_AI_API_KEY 環境變數");
+    return NextResponse.json({ error: "伺服器 API Key 設定缺失" }, { status: 500 });
+  }
+
   try {
-    // 檢查 API Key
-    if (!apiKey) {
-      console.error("錯誤: 找不到 API Key");
-      return NextResponse.json({ error: "API Key 未設定" }, { status: 500 });
-    }
-
     const { location, days, members, budget } = await req.json();
+    const genAI = new GoogleGenerativeAI(apiKey);
 
-    // 2. 嘗試使用 'gemini-1.5-flash' 的完整名稱
-    // 如果依然報 404，請嘗試改回 "gemini-1.5-flash" 或 "gemini-1.5-pro"
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // 2. 嘗試使用最新版的模型名稱字串 (加上 -latest 通常能解決 404)
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
 
     const prompt = `你是一位專業的旅遊規劃師。請為我規劃一段去 ${location} 的旅程。
     細節如下：
@@ -25,39 +23,36 @@ export async function POST(req: Request) {
     - 人數：${members} 人
     - 預算等級：${budget}
     
-    請務必以 JSON 格式回傳，格式如下（請確保 JSON 語法正確）：
+    請務必以 JSON 格式回傳，不要包含任何 markdown 標籤（如 \`\`\`json）：
     {
       "title": "旅程標題",
       "summary": "旅程簡介",
       "days": [
         { "day": 1, "plan": "當天詳細行程描述" }
       ]
-    }
-    請只回傳 JSON 字串，不要包含任何 \`\`\`json 等標籤。`;
+    }`;
+
+    console.log(`🤖 正在為 ${location} 生成行程...`);
 
     const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+    const text = result.response.text();
 
-    // 3. 強化解析邏輯，防止 AI 回傳多餘文字
-    const cleanText = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    // 3. 處理可能的 Markdown 標籤並解析
+    const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
     
-    try {
-      const travelData = JSON.parse(cleanText);
-      return NextResponse.json(travelData);
-    } catch (parseError) {
-      console.error("JSON 解析失敗，原始文字:", text);
-      return NextResponse.json({ error: "AI 回傳格式錯誤" }, { status: 500 });
-    }
+    return NextResponse.json(JSON.parse(cleanJson));
 
   } catch (error: any) {
-    // 這裡會捕捉到你剛才看到的 404 錯誤
-    console.error("Gemini API 詳細錯誤:", error);
+    console.error("❌ Gemini API 發生錯誤:", error.message);
     
-    // 如果是 404 且提示模型找不到，建議用戶檢查 API Key 是否為最新的
-    return NextResponse.json({ 
-      error: "AI 模型呼叫失敗", 
-      details: error.message 
-    }, { status: 500 });
+    // 如果還是 404，回傳更具體的建議
+    if (error.message.includes("404")) {
+      return NextResponse.json({ 
+        error: "找不到 AI 模型 (404)", 
+        details: "這通常是 API Key 的權限問題，或是模型名稱不正確。請檢查 Google AI Studio 設定。" 
+      }, { status: 404 });
+    }
+
+    return NextResponse.json({ error: "AI 生成失敗", details: error.message }, { status: 500 });
   }
 }
