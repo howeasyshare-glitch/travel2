@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import "./globals.css"; // 👈 這行絕對不能少！
+import "@/globals.css"; // 👈 這行絕對不能少！
 
 export const metadata: Metadata = {
   title: "AI 旅遊規劃師",
