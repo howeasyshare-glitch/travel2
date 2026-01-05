@@ -30,54 +30,93 @@ export default function Home() {
   };
 
   return (
-    /* 測試點 1：bg-red-500 如果沒變紅，代表 Tailwind 沒啟動 */
-    <div className="min-h-screen bg-red-500 text-white py-10 px-4">
+    <main className="min-h-screen bg-slate-50 py-12 px-4 text-slate-900">
       <div className="max-w-3xl mx-auto">
         
-        {/* 測試點 2：強制行內樣式，如果這個沒變藍色，代表 React 渲染有問題 */}
-        <header className="text-center mb-10">
-          <h1 className="text-5xl font-bold text-blue-600 bg-yellow-200">測試 Tailwind</h1>
-          <p className="text-white text-2xl font-black mt-4">
-            如果背景不是紅色的，代表 Tailwind 失效
+        {/* Header Section */}
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center justify-center p-3 bg-blue-600 text-white rounded-2xl mb-4 shadow-xl">
+            <Plane size={32} />
+          </div>
+          <h1 className="text-4xl font-black tracking-tight mb-3 text-slate-900">
+            AI 旅遊規劃師
+          </h1>
+          <p className="text-slate-500 font-medium text-lg">
+            讓人工智慧為您量身打造下一段難忘旅程
           </p>
-        </header>
+        </div>
 
-        {/* 輸入卡片 */}
-        <div className="bg-white p-6 rounded-3xl shadow-2xl border-4 border-black mb-10">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1 relative">
+        {/* Input Card */}
+        <div className="bg-white p-2 rounded-3xl shadow-xl border border-slate-100 mb-10 overflow-hidden">
+          <div className="flex flex-col md:flex-row items-center p-2 gap-2">
+            <div className="flex-1 flex items-center bg-slate-100 rounded-2xl px-4 py-3 w-full">
+              <MapPin className="text-slate-400 mr-3" size={20} />
               <input 
-                className="w-full p-4 bg-slate-200 rounded-xl text-black outline-none border-2 border-blue-500" 
-                placeholder="輸入測試地點..." 
+                className="bg-transparent border-none outline-none w-full text-lg font-medium placeholder:text-slate-400 text-slate-700" 
+                placeholder="您想去哪裡探索？（例如：京都）" 
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
               />
             </div>
             <button 
               onClick={handleSubmit}
-              className="bg-black text-white px-10 py-4 rounded-xl font-bold hover:bg-gray-800"
+              disabled={loading || !location}
+              className="w-full md:w-auto bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-lg shadow-blue-100"
             >
-              {loading ? "連線中..." : "按下測試"}
+              {loading ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />}
+              {loading ? "規劃中..." : "開始規劃"}
             </button>
           </div>
         </div>
 
-        {/* 結果顯示區 */}
+        {/* Result Section */}
         {result && (
-          <div className="bg-white text-black p-8 rounded-3xl shadow-inner">
-            <h2 className="text-3xl font-bold mb-6 text-red-600">{result.title}</h2>
-            <div className="space-y-4">
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-slate-800">
+                {result.title}
+              </h2>
+            </div>
+
+            <div className="grid gap-6">
               {result.days?.map((day: any) => (
-                <div key={day.day} className="border-b-2 border-gray-100 pb-4">
-                  <div className="font-bold text-blue-600 text-xl">Day {day.day}</div>
-                  <p className="mt-2 text-gray-700">{day.plan}</p>
+                <div key={day.day} className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-black shrink-0">
+                      {day.day}
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold mb-3 flex items-center gap-2">
+                        <Calendar size={18} className="text-slate-400" />
+                        Day {day.day} 行程重點
+                      </h3>
+                      <p className="text-slate-600 leading-relaxed whitespace-pre-line">
+                        {day.plan}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               ))}
+            </div>
+
+            <div className="flex justify-center pt-8">
+              <button 
+                onClick={() => {setResult(null); setLocation("");}} 
+                className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-bold transition-colors"
+              >
+                <RefreshCw size={18} />
+                規劃另一段旅程
+              </button>
             </div>
           </div>
         )}
 
       </div>
-    </div>
+
+      <footer className="text-center mt-20 text-slate-400 text-sm font-medium">
+        Powered by Gemini 3 Flash & Next.js 14
+      </footer>
+    </main>
   );
 }
