@@ -36,9 +36,7 @@ export default function Home() {
         
         {/* 測試點 2：強制行內樣式，如果這個沒變藍色，代表 React 渲染有問題 */}
         <header className="text-center mb-10">
-          <h1 style={{ color: 'blue', fontSize: '60px', fontWeight: 'bold', backgroundColor: 'yellow' }}>
-            CSS 優先級測試中
-          </h1>
+          <h1 className="text-5xl font-bold text-blue-600 bg-yellow-200">測試 Tailwind</h1>
           <p className="text-white text-2xl font-black mt-4">
             如果背景不是紅色的，代表 Tailwind 失效
           </p>
