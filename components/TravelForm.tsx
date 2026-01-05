@@ -1,42 +1,70 @@
-const handleSubmit = async () => {
+"use client";
+
+import React, { useState } from "react";
+// 確保你有安裝 lucide-react，如果沒有，暫時把這些 icon 刪掉
+import { MapPin, Calendar, Users, Wallet, Sparkles, Loader2 } from "lucide-react";
+
+export default function TravelForm() {
+  const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [formData, setFormData] = useState({
+    location: "",
+    days: "3",
+    members: "2",
+    budget: "中等",
+  });
+
+  const handleSubmit = async () => {
     setLoading(true);
     try {
       const apiKey = process.env.NEXT_PUBLIC_GOOGLE_GENERATIVE_AI_API_KEY;
-      if (!apiKey) throw new Error("API Key 未設定");
-
-      // 1. 使用你代碼中指定的最新模型名稱 gemini-3-flash-preview
-      const model = "gemini-3-flash-preview";
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      // 使用你從 AI Studio 獲取的最新模型名稱
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ 
-            parts: [{ text: `你是一位專業旅遊規劃師。請規劃去 ${formData.location} 的 ${formData.days} 天行程。請務必只回傳純 JSON 格式：{"title":"標題","summary":"簡介","days":[{"day":1,"plan":"內容"}]}` }] 
-          }],
-          generationConfig: {
-            // 2. 依照你提供的代碼 logic，這裡可以加入或省略 thinking_config
-            // 為了讓前端顯示穩定，我們暫時不啟用 Thinking 過程，只拿結果
-            responseMimeType: "application/json"
-          }
+          contents: [{ parts: [{ text: `請規劃 ${formData.location} ${formData.days}天行程。回傳純JSON: {"title":"標題","summary":"簡介","days":[{"day":1,"plan":"內容"}]}` }] }]
         })
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error?.message || "Google API 呼叫失敗");
-      }
-
-      // 3. 解析結果
       const aiText = data.candidates[0].content.parts[0].text;
-      setResult(JSON.parse(aiText));
+      const cleanJson = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
+      setResult(JSON.parse(cleanJson));
       setStep(4);
     } catch (error: any) {
-      console.error("最終診斷:", error);
-      alert("AI 生成失敗: " + error.message);
+      alert("失敗: " + error.message);
     } finally {
       setLoading(false);
     }
   };
+
+  return (
+    <div className="p-6 bg-white rounded-xl shadow-lg text-black">
+      {step < 4 ? (
+        <div className="space-y-4">
+          <input 
+            className="w-full p-2 border" 
+            placeholder="目的地" 
+            value={formData.location} 
+            onChange={e => setFormData({...formData, location: e.target.value})} 
+          />
+          <button 
+            onClick={step === 3 ? handleSubmit : () => setStep(step + 1)}
+            className="w-full py-2 bg-blue-600 text-white"
+          >
+            {loading ? "處理中..." : step === 3 ? "開始生成" : "下一步"}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <h2 className="text-xl font-bold">{result?.title}</h2>
+          <button onClick={() => setStep(1)} className="mt-4 border p-2">重新開始</button>
+        </div>
+      )}
+    </div>
+  );
+}
