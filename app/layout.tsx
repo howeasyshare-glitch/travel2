@@ -1,10 +1,4 @@
-import type { Metadata } from "next";
-import "./globals.css"; // 👈 這行絕對不能少！
-
-export const metadata: Metadata = {
-  title: "AI 旅遊規劃師",
-  description: "您的專屬行程助手",
-};
+import "./globals.css";
 
 export default function RootLayout({
   children,
@@ -13,6 +7,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-TW">
+      {/* 樣式會透過 import "./globals.css" 被 Next.js 自動注入到 head 中 */}
       <body>{children}</body>
     </html>
   );
