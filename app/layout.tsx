@@ -1,4 +1,5 @@
-import "./globals.css";
+// 這裡必須是第一行，確保路徑正確指向同一個資料夾下的 globals.css
+import "./globals.css"; 
 
 export default function RootLayout({
   children,
@@ -7,8 +8,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-TW">
-      {/* 樣式會透過 import "./globals.css" 被 Next.js 自動注入到 head 中 */}
-      <body>{children}</body>
+      {/* 這裡必須有 body 標籤包裹 children */}
+      <body className="antialiased">{children}</body>
     </html>
   );
 }
