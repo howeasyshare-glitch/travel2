@@ -2,45 +2,53 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: "缺少 API Key" }, { status: 500 });
+  
+  if (!apiKey) {
+    return NextResponse.json({ error: "Vercel 環境變數中找不到 API Key" }, { status: 500 });
+  }
 
   try {
     const { location, days, members, budget } = await req.json();
 
-    // 1. 改用 v1 穩定版路徑 (捨棄 v1beta)
-    // 2. 改用 gemini-1.5-pro (pro 版本通常權限最廣)
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
+    // 這是 Google AI Studio 專屬的最穩定 REST API 路徑
+    // 不經過任何 SDK，直接對準 v1 版本的 gemini-1.5-flash
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-    const prompt = `你是一位旅遊規劃師。請規劃去 ${location} ${days}天 ${members}人的 ${budget} 旅程。
-    請務必以 JSON 格式回傳：
+    const prompt = `你是一位專業旅遊規劃師。請規劃去 ${location} ${days}天 ${members}人的 ${budget} 旅程。
+    請務必只回傳 JSON 格式內容：
     {
-      "title": "標題",
-      "summary": "簡介",
-      "days": [{ "day": 1, "plan": "行程內容" }]
+      "title": "旅程標題",
+      "summary": "旅程簡介",
+      "days": [{ "day": 1, "plan": "詳細行程描述" }]
     }`;
 
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: "application/json" // 強制要求 JSON 回傳
+        }
       })
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      // 如果 pro 也失敗，嘗試最後一個 fallback: gemini-1.0-pro
-      console.error("Pro 模型失敗，嘗試降級...", data);
-      return NextResponse.json({ error: "模型未就緒", details: data.error?.message }, { status: 404 });
+      console.error("❌ Google 伺服器回報錯誤:", data);
+      return NextResponse.json({ 
+        error: "Google API 拒絕請求", 
+        details: data.error?.message 
+      }, { status: response.status });
     }
 
-    const aiText = data.candidates[0].content.parts[0].text;
-    const cleanJson = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
-    
-    return NextResponse.json(JSON.parse(cleanJson));
+    // 解析 Google 的回傳結構
+    const aiResponseText = data.candidates[0].content.parts[0].text;
+    return NextResponse.json(JSON.parse(aiResponseText));
 
   } catch (error: any) {
+    console.error("❌ 系統發生異常:", error.message);
     return NextResponse.json({ error: "生成失敗", details: error.message }, { status: 500 });
   }
 }
