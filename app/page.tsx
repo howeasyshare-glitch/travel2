@@ -12,7 +12,7 @@ export default function Home() {
   setLoading(true);
   try {
     // 改為呼叫我們自己的後端 API
-    const response = await fetch("/api/travel", {
+    const response = await fetch("/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ location })
