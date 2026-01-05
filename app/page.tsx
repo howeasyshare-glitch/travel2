@@ -9,31 +9,29 @@ export default function Home() {
   const [location, setLocation] = useState("");
 
   const handleSubmit = async () => {
-    setLoading(true);
-    try {
-      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_GENERATIVE_AI_API_KEY;
-      // 使用你提供的最新模型路徑
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+  setLoading(true);
+  try {
+    // 改為呼叫我們自己的後端 API
+    const response = await fetch("/api/travel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location })
+    });
 
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: `請規劃去 ${location} 的 3 天行程。以純 JSON 回傳：{"title":"標題","days":[{"day":1,"plan":"內容"}]}` }] }]
-        })
-      });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "生成失敗");
 
-      const data = await response.json();
-      const aiText = data.candidates[0].content.parts[0].text;
-      const cleanJson = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
-      setResult(JSON.parse(cleanJson));
-      setStep(2);
-    } catch (error: any) {
-      alert("生成失敗: " + error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+    // 解析後端傳回來的資料
+    const aiText = data.candidates[0].content.parts[0].text;
+    const cleanJson = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
+    setResult(JSON.parse(cleanJson));
+    setStep(2);
+  } catch (error: any) {
+    alert("安全模式生成失敗: " + error.message);
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <main className="min-h-screen p-8 bg-slate-50 text-black">
