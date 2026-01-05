@@ -1,4 +1,4 @@
-import TravelForm from "../components/TravelForm";
+import TravelForm from "@/components/TravelForm";
 
 export default function TravelPage() {
   return (
