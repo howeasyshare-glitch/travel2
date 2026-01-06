@@ -1,40 +1,30 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { NextResponse } from "next/server";
+const prompt = `
+  你是一位高端私人導遊。請根據以下要求規劃行程：
+  - 目的地：${location}
+  - 天數：${days}
+  - 成員：${adults}大${children}小
+  - 指定住宿：${hotelPref || "由你推薦"}
+  - 必去景點：${mustVisit || "由你推薦"}
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-
-export async function POST(req: Request) {
-  try {
-    const { location, days, adults, children, includeMeals, includeHotel } = await req.json();
-
-    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
-
-    const prompt = `
-      你是一位專業的旅遊規劃專家。請為以下需求設計行程：
-      - 地點：${location}
-      - 天數：${days} 天
-      - 成員：${adults} 位成人, ${children} 位小孩
-      - 包含需求：${includeMeals ? "在地美食推薦" : "不須推薦餐飲"}、${includeHotel ? "住宿區域建議" : "不須推薦住宿"}
-
-      請根據成員組成調整景點（如有小孩請安排親子友善景點）。
-      請嚴格以 JSON 格式回傳，格式如下：
+  請嚴格遵守以下格式回傳 JSON (不要有任何額外文字)：
+  {
+    "itinerary": [
       {
-        "title": "旅程標題",
-        "days": [
+        "day": 1,
+        "date_title": "行程主題",
+        "schedule": [
           {
-            "day": 1,
-            "plan": "景點行程描述",
-            "meals": "${includeMeals ? "早中晚餐推薦" : ""}",
-            "hotel": "${includeHotel ? "建議住宿點" : ""}"
+            "time": "09:00",
+            "activity": "活動名稱",
+            "description": "具體細節，包含建議交通或餐廳特色"
           }
         ]
       }
-    `;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return NextResponse.json(response);
-  } catch (error) {
-    return NextResponse.json({ error: "生成失敗" }, { status: 500 });
+    ]
   }
-}
+
+  注意：
+  1. 必須包含使用者指定的景點和旅館。
+  2. 時間分配要合理，考慮小孩體力。
+  3. 每一天必須包含早、中、晚餐的建議時間與地點。
+`;
