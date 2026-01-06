@@ -1,37 +1,36 @@
 "use client";
 
 import React, { useState } from "react";
-import { MapPin, Sparkles, Loader2, Plane, Calendar, Users, Utensils, Hotel, RefreshCw } from "lucide-react";
+import { MapPin, Sparkles, Loader2, Calendar, Users, Hotel, Clock, Compass, AlertCircle } from "lucide-react";
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   
-  // 結構化的參數設定
   const [form, setForm] = useState({
     location: "",
     days: 3,
     adults: 2,
     children: 0,
-    includeMeals: true,
-    includeHotel: true
+    mustVisit: "", // 指定景點
+    hotelPref: ""  // 指定飯店
   });
 
   const handleSubmit = async () => {
     if (!form.location) return;
     setLoading(true);
+    setResult(null);
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form) // 傳送整個物件
+        body: JSON.stringify(form)
       });
       const data = await response.json();
-      const aiText = data.candidates[0].content.parts[0].text;
-      const cleanJson = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
-      setResult(JSON.parse(cleanJson));
+      if (data.error) throw new Error(data.error);
+      setResult(data);
     } catch (error: any) {
-      alert("生成失敗: " + error.message);
+      alert("生成失敗，請檢查 API 設定");
     } finally {
       setLoading(false);
     }
@@ -42,7 +41,7 @@ export default function Home() {
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-slate-900 mb-2">專業 AI 旅程助手</h1>
-          <p className="text-slate-500">輸入細節，為您規劃專屬行程</p>
+          <p className="text-slate-500">輸入特定景點與飯店，為您量身打造排程</p>
         </div>
 
         {/* 設定表單 */}
@@ -51,7 +50,7 @@ export default function Home() {
             {/* 地點 */}
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-slate-700 mb-2">探索目的地</label>
-              <div className="flex items-center bg-slate-100 rounded-xl px-4 py-3">
+              <div className="flex items-center bg-slate-100 rounded-xl px-4 py-3 border-2 border-transparent focus-within:border-blue-500 transition-all">
                 <MapPin className="text-slate-400 mr-2" size={20} />
                 <input 
                   className="bg-transparent w-full outline-none font-medium" 
@@ -63,90 +62,48 @@ export default function Home() {
             </div>
 
             {/* 天數與人數 */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                <Calendar size={16}/> 旅遊天數
-              </label>
-              <input 
-                type="number" min="1" max="10"
-                className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none font-medium"
-                value={form.days}
-                onChange={(e) => setForm({...form, days: parseInt(e.target.value)})}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">成人</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">天數</label>
+                <input type="number" className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none" 
+                  value={form.days} onChange={(e) => setForm({...form, days: parseInt(e.target.value)})}/>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">成人</label>
                 <input type="number" className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none" 
                   value={form.adults} onChange={(e) => setForm({...form, adults: parseInt(e.target.value)})}/>
               </div>
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">小孩</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1">小孩</label>
                 <input type="number" className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none" 
                   value={form.children} onChange={(e) => setForm({...form, children: parseInt(e.target.value)})}/>
               </div>
             </div>
 
-            {/* 輔助開關 */}
-            <div className="flex gap-6 items-center pt-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.includeMeals} 
-                  onChange={(e) => setForm({...form, includeMeals: e.target.checked})}
-                  className="w-5 h-5 accent-blue-600" />
-                <span className="font-bold text-slate-700 flex items-center gap-1"><Utensils size={16}/> 包含三餐</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.includeHotel} 
-                  onChange={(e) => setForm({...form, includeHotel: e.target.checked})}
-                  className="w-5 h-5 accent-blue-600" />
-                <span className="font-bold text-slate-700 flex items-center gap-1"><Hotel size={16}/> 推薦住宿</span>
-              </label>
+            {/* 指定飯店 */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">指定飯店或住宿需求</label>
+              <div className="flex items-center bg-slate-100 rounded-xl px-4 py-3">
+                <Hotel className="text-slate-400 mr-2" size={20} />
+                <input className="bg-transparent w-full outline-none font-medium text-sm" 
+                  placeholder="例如：ABC飯店 或 靠近捷運站" value={form.hotelPref}
+                  onChange={(e) => setForm({...form, hotelPref: e.target.value})}/>
+              </div>
+            </div>
+
+            {/* 指定景點 */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-bold text-slate-700 mb-2">想去的特定景點 (自訂)</label>
+              <div className="flex items-start bg-slate-100 rounded-xl px-4 py-3">
+                <Compass className="text-slate-400 mr-2 mt-1" size={20} />
+                <textarea className="bg-transparent w-full outline-none font-medium text-sm h-20" 
+                  placeholder="例如：迪士尼、豪德寺、敘敘苑燒肉 (用逗號隔開)" value={form.mustVisit}
+                  onChange={(e) => setForm({...form, mustVisit: e.target.value})}/>
+              </div>
             </div>
 
             <button 
               onClick={handleSubmit}
               disabled={loading || !form.location}
-              className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg"
+              className="md:col-span-2 bg-slate-900 hover:bg-black text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95"
             >
-              {loading ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />}
-              {loading ? "AI 正在思考最佳方案..." : "生成完整行程表"}
-            </button>
-          </div>
-        </div>
-
-        {/* 結果顯示 */}
-        {result && (
-          <div className="space-y-6">
-            <h2 className="text-3xl font-bold text-center text-slate-800 mb-8">{result.title}</h2>
-            {result.days?.map((day: any) => (
-              <div key={day.day} className="bg-white rounded-3xl p-8 shadow-md border border-slate-100">
-                <div className="flex items-center gap-3 mb-6">
-                  <span className="bg-blue-600 text-white px-4 py-1 rounded-full font-black text-sm">DAY {day.day}</span>
-                </div>
-                <div className="space-y-6">
-                  <div>
-                    <h4 className="font-bold text-slate-400 text-xs uppercase tracking-widest mb-2">行程安排</h4>
-                    <p className="text-slate-700 leading-relaxed">{day.plan}</p>
-                  </div>
-                  {day.meals && (
-                    <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100">
-                      <h4 className="font-bold text-orange-700 text-sm mb-2 flex items-center gap-2"><Utensils size={16}/> 美食推薦</h4>
-                      <p className="text-orange-900 text-sm italic">{day.meals}</p>
-                    </div>
-                  )}
-                  {day.hotel && (
-                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
-                      <h4 className="font-bold text-blue-700 text-sm mb-2 flex items-center gap-2"><Hotel size={16}/> 住宿建議</h4>
-                      <p className="text-blue-900 text-sm">{day.hotel}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </main>
-  );
-}
