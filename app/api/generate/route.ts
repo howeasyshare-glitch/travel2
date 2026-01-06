@@ -5,34 +5,27 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export async function POST(req: Request) {
   try {
-    const { location, days, adults, children, mustVisit, hotelPref } = await req.json();
-    
-    // 指定使用最新的 1.5 Flash 模型
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
-      // 強制要求輸出格式為 JSON
-      generationConfig: {
-        responseMimeType: "application/json",
-      }
-    });
+    const { location, days, adults, children, includeMeals, includeHotel } = await req.json();
+
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
     const prompt = `
-      你是一位專業旅遊規劃師。請根據以下參數規劃行程：
-      目的地：${location}
-      總天數：${days}天
-      旅客：${adults}位成人，${children}位小孩
-      必去景點：${mustVisit}
-      住宿偏好：${hotelPref}
+      你是一位專業的旅遊規劃專家。請為以下需求設計行程：
+      - 地點：${location}
+      - 天數：${days} 天
+      - 成員：${adults} 位成人, ${children} 位小孩
+      - 包含需求：${includeMeals ? "在地美食推薦" : "不須推薦餐飲"}、${includeHotel ? "住宿區域建議" : "不須推薦住宿"}
 
-      輸出的 JSON 格式必須精確對應以下結構：
+      請根據成員組成調整景點（如有小孩請安排親子友善景點）。
+      請嚴格以 JSON 格式回傳，格式如下：
       {
-        "itinerary": [
+        "title": "旅程標題",
+        "days": [
           {
             "day": 1,
-            "date_title": "當日標題",
-            "schedule": [
-              { "time": "09:00", "activity": "活動名稱", "description": "詳細描述" }
-            ]
+            "plan": "景點行程描述",
+            "meals": "${includeMeals ? "早中晚餐推薦" : ""}",
+            "hotel": "${includeHotel ? "建議住宿點" : ""}"
           }
         ]
       }
@@ -40,12 +33,8 @@ export async function POST(req: Request) {
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const text = response.text();
-
-    // 這裡直接解析並回傳，因為 JSON Mode 保證了 text 就是 JSON
-    return NextResponse.json(JSON.parse(text));
-  } catch (error: any) {
-    console.error("API 執行出錯:", error);
-    return NextResponse.json({ error: "API 請求失敗，請確認 API Key 是否有效" }, { status: 500 });
+    return NextResponse.json(response);
+  } catch (error) {
+    return NextResponse.json({ error: "生成失敗" }, { status: 500 });
   }
 }
