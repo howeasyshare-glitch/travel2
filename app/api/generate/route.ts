@@ -6,32 +6,49 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 export async function POST(req: Request) {
   try {
     const { location, days, adults, children, mustVisit, hotelPref } = await req.json();
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+    
+    // 使用 Gemini 1.5 Flash，速度快且對 JSON 支援度高
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const prompt = `你是一位專業導遊。請為以下需求規劃行程：
-      地點：${location}，天數：${days}天，成員：${adults}大${children}小。
-      指定景點：${mustVisit}，指定旅館：${hotelPref}。
+    const prompt = `
+      你是一位專業旅遊規劃師。請為以下需求設計行程，並僅以 JSON 格式回傳，不要包含任何開場白或結論。
+      
+      需求：
+      - 地點：${location}
+      - 天數：${days}天
+      - 人數：${adults}位成人, ${children}位小孩
+      - 指定景點：${mustVisit || "由你推薦"}
+      - 住宿偏好：${hotelPref || "由你推薦"}
 
-      請嚴格回傳 JSON 格式（不要包含任何 Markdown 區塊標籤），結構必須如下：
+      JSON 結構範例 (請嚴格遵守)：
       {
         "itinerary": [
           {
             "day": 1,
             "date_title": "行程主題",
             "schedule": [
-              { "time": "09:00", "activity": "景點名稱", "description": "描述" }
+              { "time": "09:00", "activity": "活動名稱", "description": "細節描述" }
             ]
           }
         ]
-      }`;
+      }
+    `;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const text = response.text(); 
-    
-    // 這裡直接回傳純文字，讓前端處理
-    return NextResponse.json({ rawText: text });
-  } catch (error) {
-    return NextResponse.json({ error: "API 錯誤" }, { status: 500 });
+    const text = response.text();
+
+    // --- 超強效 JSON 擷取邏輯 ---
+    let jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+        throw new Error("AI 沒有回傳有效的 JSON 格式");
+    }
+    const cleanJson = JSON.parse(jsonMatch[0]);
+    // -------------------------
+
+    return NextResponse.json(cleanJson);
+  } catch (error: any) {
+    console.error("API Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
