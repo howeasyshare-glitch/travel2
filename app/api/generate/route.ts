@@ -7,46 +7,28 @@ export async function POST(req: Request) {
   try {
     const { location, days, adults, children, mustVisit, hotelPref } = await req.json();
 
-    // 使用 1.5-flash 並開啟 JSON Mode
+    // 檢查 API Key 是否存在
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json({ error: "伺服器缺少 API Key 設定" }, { status: 500 });
+    }
+
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
+      model: "gemini-1.5-flash", // 這是目前最穩定的名稱
       generationConfig: { responseMimeType: "application/json" }
     });
 
-    const prompt = `
-      你是一位專業旅遊規劃師。請為以下需求設計一份詳細的帶時間點的行程表：
-      - 地點：${location}
-      - 天數：${days} 天
-      - 成員：${adults} 位成人, ${children} 位小孩
-      - 必去景點：${mustVisit || "由你根據地點推薦"}
-      - 指定住宿/飯店：${hotelPref || "由你推薦距離市中心近的旅館"}
-
-      請根據成員組成調整行程（如有小孩請安排親子友善景點）。
-      
-      請嚴格以 JSON 格式回傳，格式如下：
-      {
-        "title": "旅程標題",
-        "itinerary": [
-          {
-            "day": 1,
-            "date_label": "第一天 行程開始",
-            "schedule": [
-              { "time": "09:00", "activity": "抵達地點/活動名稱", "description": "詳細內容與建議" },
-              { "time": "12:00", "activity": "午餐建議", "description": "具體餐廳或特色美食建議" }
-            ]
-          }
-        ]
-      }
-    `;
+    const prompt = `你是一位專業導遊，請為前往 ${location} 的 ${adults}大${children}小 規劃 ${days} 天行程。
+      指定景點：${mustVisit}
+      住宿需求：${hotelPref}
+      請回傳 JSON 格式，包含 title (字串) 和 itinerary (陣列，內含 day, date_label, schedule)。`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
     
-    // 直接解析 AI 回傳的純 JSON
     return NextResponse.json(JSON.parse(text));
-  } catch (error) {
+  } catch (error: any) {
     console.error("API Error:", error);
-    return NextResponse.json({ error: "生成失敗" }, { status: 500 });
+    return NextResponse.json({ error: error.message || "AI 生成失敗" }, { status: 500 });
   }
 }
