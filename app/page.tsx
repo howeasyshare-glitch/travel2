@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { MapPin, Sparkles, Loader2, Calendar, Users, Hotel, Clock, Compass, AlertCircle } from "lucide-react";
+import { MapPin, Sparkles, Loader2, Calendar, Users, Hotel, Clock, Compass } from "lucide-react";
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
@@ -12,8 +12,8 @@ export default function Home() {
     days: 3,
     adults: 2,
     children: 0,
-    mustVisit: "", // 指定景點
-    hotelPref: ""  // 指定飯店
+    mustVisit: "",
+    hotelPref: ""
   });
 
   const handleSubmit = async () => {
@@ -44,13 +44,11 @@ export default function Home() {
           <p className="text-slate-500">輸入特定景點與飯店，為您量身打造排程</p>
         </div>
 
-        {/* 設定表單 */}
         <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 mb-10">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* 地點 */}
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-slate-700 mb-2">探索目的地</label>
-              <div className="flex items-center bg-slate-100 rounded-xl px-4 py-3 border-2 border-transparent focus-within:border-blue-500 transition-all">
+              <div className="flex items-center bg-slate-100 rounded-xl px-4 py-3">
                 <MapPin className="text-slate-400 mr-2" size={20} />
                 <input 
                   className="bg-transparent w-full outline-none font-medium" 
@@ -61,7 +59,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 天數與人數 */}
             <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">天數</label>
@@ -80,24 +77,22 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 指定飯店 */}
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">指定飯店或住宿需求</label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">指定飯店需求</label>
               <div className="flex items-center bg-slate-100 rounded-xl px-4 py-3">
                 <Hotel className="text-slate-400 mr-2" size={20} />
                 <input className="bg-transparent w-full outline-none font-medium text-sm" 
-                  placeholder="例如：ABC飯店 或 靠近捷運站" value={form.hotelPref}
+                  placeholder="例如：近車站的飯店" value={form.hotelPref}
                   onChange={(e) => setForm({...form, hotelPref: e.target.value})}/>
               </div>
             </div>
 
-            {/* 指定景點 */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-bold text-slate-700 mb-2">想去的特定景點 (自訂)</label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">想去的特定景點</label>
               <div className="flex items-start bg-slate-100 rounded-xl px-4 py-3">
                 <Compass className="text-slate-400 mr-2 mt-1" size={20} />
                 <textarea className="bg-transparent w-full outline-none font-medium text-sm h-20" 
-                  placeholder="例如：迪士尼、豪德寺、敘敘苑燒肉 (用逗號隔開)" value={form.mustVisit}
+                  placeholder="迪士尼, 淺草寺..." value={form.mustVisit}
                   onChange={(e) => setForm({...form, mustVisit: e.target.value})}/>
               </div>
             </div>
@@ -105,5 +100,39 @@ export default function Home() {
             <button 
               onClick={handleSubmit}
               disabled={loading || !form.location}
-              className="md:col-span-2 bg-slate-900 hover:bg-black text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95"
+              className="md:col-span-2 bg-slate-900 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2"
             >
+              {loading ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />}
+              {loading ? "規劃中..." : "開始規劃"}
+            </button>
+          </div>
+        </div>
+
+        {result && (
+          <div className="space-y-12">
+            <h2 className="text-3xl font-black text-center text-slate-800">{result.title}</h2>
+            {result.itinerary?.map((day: any, dIdx: number) => (
+              <div key={dIdx} className="relative">
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold">Day {day.day}</div>
+                  <h3 className="text-xl font-bold">{day.date_label}</h3>
+                </div>
+                <div className="ml-7 border-l-2 border-slate-200 pl-9 space-y-6">
+                  {day.schedule?.map((item: any, iIdx: number) => (
+                    <div key={iIdx} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                      <div className="flex items-center gap-2 text-blue-600 font-bold mb-1">
+                        <Clock size={16} /> <span>{item.time}</span>
+                      </div>
+                      <h4 className="font-bold text-slate-800">{item.activity}</h4>
+                      <p className="text-slate-500 text-sm">{item.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
