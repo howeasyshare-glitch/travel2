@@ -1,45 +1,37 @@
 "use client";
 
 import React, { useState } from "react";
-import { Clock, Sparkles, Loader2, Calendar, Users, Hotel, AlertCircle, MapPin, Terminal } from "lucide-react";
+import { MapPin, Sparkles, Loader2, Plane, Calendar, Users, Utensils, Hotel, RefreshCw } from "lucide-react";
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  // 結構化的參數設定
   const [form, setForm] = useState({
-    location: "", days: 2, adults: 2, children: 0, mustVisit: "", hotelPref: ""
+    location: "",
+    days: 3,
+    adults: 2,
+    children: 0,
+    includeMeals: true,
+    includeHotel: true
   });
 
   const handleSubmit = async () => {
     if (!form.location) return;
     setLoading(true);
-    setResult(null);
-    setErrorMsg(null);
-    
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
+        body: JSON.stringify(form) // 傳送整個物件
       });
-      
       const data = await response.json();
-      
-      // 這是為了除錯：在瀏覽器 F12 視窗可以看到回傳內容
-      console.log("AI Response Data:", data);
-
-      if (data.error) throw new Error(data.error);
-
-      // 檢查關鍵欄位是否存在
-      if (data.itinerary && Array.isArray(data.itinerary)) {
-        setResult(data);
-      } else {
-        throw new Error("回傳格式不符合預期 (缺少 itinerary)");
-      }
+      const aiText = data.candidates[0].content.parts[0].text;
+      const cleanJson = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
+      setResult(JSON.parse(cleanJson));
     } catch (error: any) {
-      console.error("Catch Error:", error);
-      setErrorMsg("生成失敗：可能是 API Key 無法運作或格式錯誤。");
+      alert("生成失敗: " + error.message);
     } finally {
       setLoading(false);
     }
@@ -48,73 +40,112 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 py-12 px-4">
       <div className="max-w-4xl mx-auto">
-        {/* 表單區 */}
-        <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-slate-100 mb-8">
-          <div className="flex items-center gap-2 mb-6">
-            <div className="bg-blue-100 p-2 rounded-xl">
-              <MapPin className="text-blue-600" />
-            </div>
-            <h1 className="text-2xl font-black">AI 深度旅遊規劃</h1>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <input className="md:col-span-2 p-4 bg-slate-50 rounded-2xl border-2 border-transparent focus:border-blue-500 outline-none transition-all" 
-              placeholder="去哪裡？ (例如：宜蘭、巴黎)" value={form.location} onChange={(e)=>setForm({...form, location:e.target.value})}/>
-            
-            <div className="flex gap-2">
-              <input type="number" className="w-full p-4 bg-slate-50 rounded-2xl outline-none" placeholder="天數" value={form.days} onChange={(e)=>setForm({...form, days:parseInt(e.target.value)})}/>
-              <input type="number" className="w-full p-4 bg-slate-50 rounded-2xl outline-none" placeholder="人數" value={form.adults} onChange={(e)=>setForm({...form, adults:parseInt(e.target.value)})}/>
+        <div className="text-center mb-10">
+          <h1 className="text-4xl font-black text-slate-900 mb-2">專業 AI 旅程助手</h1>
+          <p className="text-slate-500">輸入細節，為您規劃專屬行程</p>
+        </div>
+
+        {/* 設定表單 */}
+        <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 mb-10">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* 地點 */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-bold text-slate-700 mb-2">探索目的地</label>
+              <div className="flex items-center bg-slate-100 rounded-xl px-4 py-3">
+                <MapPin className="text-slate-400 mr-2" size={20} />
+                <input 
+                  className="bg-transparent w-full outline-none font-medium" 
+                  placeholder="例如：東京、台南..." 
+                  value={form.location}
+                  onChange={(e) => setForm({...form, location: e.target.value})}
+                />
+              </div>
             </div>
 
-            <input className="w-full p-4 bg-slate-50 rounded-2xl outline-none" placeholder="指定飯店 (選填)" value={form.hotelPref} onChange={(e)=>setForm({...form, hotelPref:e.target.value})}/>
-            
-            <textarea className="md:col-span-2 p-4 bg-slate-50 rounded-2xl outline-none min-h-[100px]" placeholder="想去的景點或特別要求..." value={form.mustVisit} onChange={(e)=>setForm({...form, mustVisit:e.target.value})}/>
-            
-            <button onClick={handleSubmit} disabled={loading} className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white p-5 rounded-2xl font-bold flex justify-center items-center gap-2 shadow-lg shadow-blue-100 transition-all">
-              {loading ? <Loader2 className="animate-spin"/> : <Sparkles size={20}/>}
-              {loading ? "正在解析地理位置與景點..." : "開始規劃"}
+            {/* 天數與人數 */}
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                <Calendar size={16}/> 旅遊天數
+              </label>
+              <input 
+                type="number" min="1" max="10"
+                className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none font-medium"
+                value={form.days}
+                onChange={(e) => setForm({...form, days: parseInt(e.target.value)})}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">成人</label>
+                <input type="number" className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none" 
+                  value={form.adults} onChange={(e) => setForm({...form, adults: parseInt(e.target.value)})}/>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">小孩</label>
+                <input type="number" className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none" 
+                  value={form.children} onChange={(e) => setForm({...form, children: parseInt(e.target.value)})}/>
+              </div>
+            </div>
+
+            {/* 輔助開關 */}
+            <div className="flex gap-6 items-center pt-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.includeMeals} 
+                  onChange={(e) => setForm({...form, includeMeals: e.target.checked})}
+                  className="w-5 h-5 accent-blue-600" />
+                <span className="font-bold text-slate-700 flex items-center gap-1"><Utensils size={16}/> 包含三餐</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={form.includeHotel} 
+                  onChange={(e) => setForm({...form, includeHotel: e.target.checked})}
+                  className="w-5 h-5 accent-blue-600" />
+                <span className="font-bold text-slate-700 flex items-center gap-1"><Hotel size={16}/> 推薦住宿</span>
+              </label>
+            </div>
+
+            <button 
+              onClick={handleSubmit}
+              disabled={loading || !form.location}
+              className="md:col-span-2 bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg"
+            >
+              {loading ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />}
+              {loading ? "AI 正在思考最佳方案..." : "生成完整行程表"}
             </button>
           </div>
         </div>
 
-        {/* 錯誤區 */}
-        {errorMsg && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-700 p-5 rounded-2xl flex flex-col gap-2 mb-8">
-            <div className="flex items-center gap-2 font-bold">
-              <AlertCircle size={20}/> {errorMsg}
-            </div>
-            <p className="text-xs opacity-70 italic">提示：請確認您的 GEMINI_API_KEY 是否正確，或嘗試換一個地點測試。</p>
-          </div>
-        )}
-
-        {/* 行程結果區 */}
-        <div className="space-y-8">
-          {result?.itinerary?.map((day: any, dIdx: number) => (
-            <div key={dIdx} className="bg-white rounded-[2rem] overflow-hidden shadow-sm border border-slate-100">
-              <div className="bg-slate-900 text-white p-6">
-                <div className="flex items-center gap-3">
-                  <span className="bg-blue-600 px-3 py-1 rounded-lg font-black">Day {day.day}</span>
-                  <h2 className="text-xl font-bold">{day.date_title}</h2>
+        {/* 結果顯示 */}
+        {result && (
+          <div className="space-y-6">
+            <h2 className="text-3xl font-bold text-center text-slate-800 mb-8">{result.title}</h2>
+            {result.days?.map((day: any) => (
+              <div key={day.day} className="bg-white rounded-3xl p-8 shadow-md border border-slate-100">
+                <div className="flex items-center gap-3 mb-6">
+                  <span className="bg-blue-600 text-white px-4 py-1 rounded-full font-black text-sm">DAY {day.day}</span>
+                </div>
+                <div className="space-y-6">
+                  <div>
+                    <h4 className="font-bold text-slate-400 text-xs uppercase tracking-widest mb-2">行程安排</h4>
+                    <p className="text-slate-700 leading-relaxed">{day.plan}</p>
+                  </div>
+                  {day.meals && (
+                    <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100">
+                      <h4 className="font-bold text-orange-700 text-sm mb-2 flex items-center gap-2"><Utensils size={16}/> 美食推薦</h4>
+                      <p className="text-orange-900 text-sm italic">{day.meals}</p>
+                    </div>
+                  )}
+                  {day.hotel && (
+                    <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                      <h4 className="font-bold text-blue-700 text-sm mb-2 flex items-center gap-2"><Hotel size={16}/> 住宿建議</h4>
+                      <p className="text-blue-900 text-sm">{day.hotel}</p>
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="p-6 space-y-6">
-                {day.schedule?.map((item: any, iIdx: number) => (
-                  <div key={iIdx} className="flex gap-4">
-                    <div className="min-w-[70px] pt-1">
-                      <span className="text-blue-600 font-black flex items-center gap-1 text-sm">
-                        <Clock size={14}/> {item.time}
-                      </span>
-                    </div>
-                    <div className="flex-1 pb-6 border-b border-slate-50 last:border-0">
-                      <h3 className="font-bold text-lg text-slate-800">{item.activity}</h3>
-                      <p className="text-slate-500 text-sm mt-1 leading-relaxed">{item.description}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </main>
   );
