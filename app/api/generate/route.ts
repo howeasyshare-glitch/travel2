@@ -1,37 +1,40 @@
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+
 export async function POST(req: Request) {
-  // 從環境變數讀取 Key (這裡不需要 NEXT_PUBLIC_，更安全)
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    return NextResponse.json({ error: "伺服器未設定 API Key" }, { status: 500 });
-  }
-
   try {
-    const { location } = await req.json();
+    const { location, days, adults, children, includeMeals, includeHotel } = await req.json();
 
-    // 對準你帳號專屬的 gemini-3-flash-preview
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ 
-          parts: [{ text: `你是一位專業旅遊規劃師。請規劃去 ${location} 的 3 天行程。請務必只回傳純 JSON 格式：{"title":"標題","days":[{"day":1,"plan":"內容"}]}` }] 
-        }],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
-      })
-    });
+    const prompt = `
+      你是一位專業的旅遊規劃專家。請為以下需求設計行程：
+      - 地點：${location}
+      - 天數：${days} 天
+      - 成員：${adults} 位成人, ${children} 位小孩
+      - 包含需求：${includeMeals ? "在地美食推薦" : "不須推薦餐飲"}、${includeHotel ? "住宿區域建議" : "不須推薦住宿"}
 
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || "Google API 錯誤");
+      請根據成員組成調整景點（如有小孩請安排親子友善景點）。
+      請嚴格以 JSON 格式回傳，格式如下：
+      {
+        "title": "旅程標題",
+        "days": [
+          {
+            "day": 1,
+            "plan": "景點行程描述",
+            "meals": "${includeMeals ? "早中晚餐推薦" : ""}",
+            "hotel": "${includeHotel ? "建議住宿點" : ""}"
+          }
+        ]
+      }
+    `;
 
-    return NextResponse.json(data);
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return NextResponse.json(response);
+  } catch (error) {
+    return NextResponse.json({ error: "生成失敗" }, { status: 500 });
   }
 }
