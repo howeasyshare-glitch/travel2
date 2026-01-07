@@ -1,34 +1,79 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+
 import { NextResponse } from "next/server";
+
+
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
+
+
 export async function POST(req: Request) {
+
   try {
-    const { location, days, adults, children, mustVisit, hotelPref } = await req.json();
 
-    // 檢查 API Key 是否存在
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json({ error: "伺服器缺少 API Key 設定" }, { status: 500 });
-    }
+    const { location, days, adults, children, includeMeals, includeHotel } = await req.json();
 
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash", // 這是目前最穩定的名稱
-      generationConfig: { responseMimeType: "application/json" }
-    });
 
-    const prompt = `你是一位專業導遊，請為前往 ${location} 的 ${adults}大${children}小 規劃 ${days} 天行程。
-      指定景點：${mustVisit}
-      住宿需求：${hotelPref}
-      請回傳 JSON 格式，包含 title (字串) 和 itinerary (陣列，內含 day, date_label, schedule)。`;
+
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+
+
+
+    const prompt = `
+
+      你是一位專業的旅遊規劃專家。請為以下需求設計行程：
+
+      - 地點：${location}
+
+      - 天數：${days} 天
+
+      - 成員：${adults} 位成人, ${children} 位小孩
+
+      - 包含需求：${includeMeals ? "在地美食推薦" : "不須推薦餐飲"}、${includeHotel ? "住宿區域建議" : "不須推薦住宿"}
+
+
+
+      請根據成員組成調整景點（如有小孩請安排親子友善景點）。
+
+      請嚴格以 JSON 格式回傳，格式如下：
+
+      {
+
+        "title": "旅程標題",
+
+        "days": [
+
+          {
+
+            "day": 1,
+
+            "plan": "景點行程描述",
+
+            "meals": "${includeMeals ? "早中晚餐推薦" : ""}",
+
+            "hotel": "${includeHotel ? "建議住宿點" : ""}"
+
+          }
+
+        ]
+
+      }
+
+    `;
+
+
 
     const result = await model.generateContent(prompt);
+
     const response = await result.response;
-    const text = response.text();
-    
-    return NextResponse.json(JSON.parse(text));
-  } catch (error: any) {
-    console.error("API Error:", error);
-    return NextResponse.json({ error: error.message || "AI 生成失敗" }, { status: 500 });
+
+    return NextResponse.json(response);
+
+  } catch (error) {
+
+    return NextResponse.json({ error: "生成失敗" }, { status: 500 });
+
   }
+
 }
