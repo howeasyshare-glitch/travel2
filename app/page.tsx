@@ -12,20 +12,38 @@ import {
   Plus,
   Trash2,
   Pencil,
+  Flag,
+  Car,
+  Coffee,
 } from "lucide-react";
 
 type Mode = "recommend" | "custom";
-
+type Pace = "packed" | "normal" | "relaxed";
 type BlockType = "arrival" | "spot" | "meal" | "hotel" | "move" | "free";
+
+type Option = {
+  label: "A" | "B";
+  title: string;
+  place?: string;
+  note?: string;
+  score: number; // 0-100
+  reason: string; // 簡短理由
+};
 
 type ItineraryBlock = {
   id: string;
   timeStart: string; // "HH:MM"
-  timeEnd: string;   // "HH:MM"
+  timeEnd: string; // "HH:MM"
   type: BlockType;
+
+  // 目前選中的內容（會跟著 selectedOption 變動）
   title: string;
   place?: string;
   note?: string;
+
+  // 只有 spot/meal/hotel 會有 options
+  options?: Option[];
+  selectedOption?: "A" | "B";
 };
 
 type ItineraryDay = {
@@ -35,9 +53,61 @@ type ItineraryDay = {
 
 type Itinerary = {
   title: string;
-  assumptions?: Record<string, any>;
+  assumptions?: {
+    startTime?: string;
+    pace?: Pace;
+  };
   days: ItineraryDay[];
 };
+
+const typeMeta: Record<
+  BlockType,
+  { label: string; icon: any; bg: string; chip: string }
+> = {
+  arrival: {
+    label: "抵達/開始",
+    icon: Flag,
+    bg: "bg-indigo-50 border-indigo-100",
+    chip: "bg-indigo-600",
+  },
+  spot: {
+    label: "景點",
+    icon: Landmark,
+    bg: "bg-emerald-50 border-emerald-100",
+    chip: "bg-emerald-600",
+  },
+  meal: {
+    label: "餐廳/用餐",
+    icon: Utensils,
+    bg: "bg-orange-50 border-orange-100",
+    chip: "bg-orange-600",
+  },
+  hotel: {
+    label: "住宿/Check-in",
+    icon: Hotel,
+    bg: "bg-blue-50 border-blue-100",
+    chip: "bg-blue-600",
+  },
+  move: {
+    label: "移動/交通",
+    icon: Car,
+    bg: "bg-slate-50 border-slate-200",
+    chip: "bg-slate-700",
+  },
+  free: {
+    label: "自由活動",
+    icon: Coffee,
+    bg: "bg-violet-50 border-violet-100",
+    chip: "bg-violet-600",
+  },
+};
+
+function scoreLabel(score: number) {
+  if (score >= 85) return "很推薦";
+  if (score >= 70) return "推薦";
+  if (score >= 55) return "可考慮";
+  return "普通";
+}
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
@@ -48,6 +118,7 @@ export default function Home() {
     days: 3,
     adults: 2,
     children: 0,
+    pace: "normal" as Pace,
     meals: { mode: "recommend" as Mode, customText: "" },
     hotel: { mode: "recommend" as Mode, customText: "" },
     spots: { mode: "custom" as Mode, customList: ["景點1", "景點2"] as string[] },
@@ -57,7 +128,6 @@ export default function Home() {
     if (!form.location) return false;
     if (form.days < 1) return false;
     if (form.adults < 1) return false;
-    // custom 模式需要有內容
     if (form.hotel.mode === "custom" && !form.hotel.customText.trim()) return false;
     if (form.meals.mode === "custom" && !form.meals.customText.trim()) return false;
     if (form.spots.mode === "custom") {
@@ -83,10 +153,27 @@ export default function Home() {
       }
 
       const data = await response.json();
-      // 你原本是 Gemini candidates 格式；這裡仍保留同樣解析方式
       const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       const clean = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
       const parsed = JSON.parse(clean) as Itinerary;
+
+      // 若 AI 有給 options + selectedOption，確保 title/place/note 同步（保底）
+      parsed.days?.forEach((d) => {
+        d.blocks?.forEach((b) => {
+          if (
+            (b.type === "spot" || b.type === "meal" || b.type === "hotel") &&
+            b.options?.length
+          ) {
+            const pick = b.selectedOption ?? "A";
+            const opt = b.options.find((o) => o.label === pick) ?? b.options[0];
+            b.selectedOption = opt.label;
+            b.title = opt.title;
+            b.place = opt.place;
+            b.note = opt.note;
+          }
+        });
+      });
+
       setResult(parsed);
     } catch (error: any) {
       alert("生成失敗: " + error.message);
@@ -107,6 +194,29 @@ export default function Home() {
     });
   };
 
+  const switchOption = (dayIndex: number, blockId: string, to: "A" | "B") => {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const next = structuredClone(prev);
+      const day = next.days[dayIndex];
+      const idx = day.blocks.findIndex((b) => b.id === blockId);
+      if (idx === -1) return prev;
+
+      const b = day.blocks[idx];
+      if (!b.options?.length) return prev;
+
+      const opt = b.options.find((o) => o.label === to);
+      if (!opt) return prev;
+
+      b.selectedOption = to;
+      b.title = opt.title;
+      b.place = opt.place;
+      b.note = opt.note;
+
+      return next;
+    });
+  };
+
   const removeSpotRow = (idx: number) => {
     setForm((p) => {
       const next = structuredClone(p);
@@ -120,15 +230,33 @@ export default function Home() {
     setForm((p) => ({ ...p, spots: { ...p.spots, customList: [...p.spots.customList, ""] } }));
   };
 
+  const paceButton = (value: Pace, label: string, sub: string) => {
+    const active = form.pace === value;
+    return (
+      <button
+        type="button"
+        onClick={() => setForm({ ...form, pace: value })}
+        className={`flex-1 p-3 rounded-2xl border text-left transition ${
+          active
+            ? "bg-blue-600 text-white border-blue-600"
+            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+        }`}
+      >
+        <div className="font-black">{label}</div>
+        <div className={`text-xs mt-1 ${active ? "text-white/80" : "text-slate-400"}`}>{sub}</div>
+      </button>
+    );
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 py-12 px-4">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-slate-900 mb-2">專業 AI 旅程助手</h1>
-          <p className="text-slate-500">輸入需求 → 生成可編輯的時間行程表</p>
+          <p className="text-slate-500">輸入需求 → 生成可切換/可編輯的時間行程表</p>
         </div>
 
-        {/* 設定表單 */}
+        {/* 表單 */}
         <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 mb-10">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* 地點 */}
@@ -145,6 +273,16 @@ export default function Home() {
               </div>
             </div>
 
+            {/* 節奏 */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-bold text-slate-700 mb-2">旅遊節奏</label>
+              <div className="flex gap-3">
+                {paceButton("packed", "趕", "景點多、走得密、休息少")}
+                {paceButton("normal", "一般", "平衡安排，彈性適中")}
+                {paceButton("relaxed", "悠閑", "停留久、留白多、慢慢玩")}
+              </div>
+            </div>
+
             {/* 天數與人數 */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
@@ -158,7 +296,6 @@ export default function Home() {
                 value={form.days}
                 onChange={(e) => setForm({ ...form, days: parseInt(e.target.value || "1", 10) })}
               />
-              <p className="text-xs text-slate-400 mt-2">小提醒：先做 1–5 天的體驗最好</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -216,7 +353,7 @@ export default function Home() {
               {form.meals.mode === "custom" && (
                 <input
                   className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none"
-                  placeholder="例：想吃燒肉、不要海鮮、找親子友善餐廳..."
+                  placeholder="例：想吃燒肉、不要海鮮、找親子友善..."
                   value={form.meals.customText}
                   onChange={(e) => setForm({ ...form, meals: { ...form.meals, customText: e.target.value } })}
                 />
@@ -280,11 +417,7 @@ export default function Home() {
                       </button>
                     </div>
                   ))}
-                  <button
-                    type="button"
-                    onClick={addSpotRow}
-                    className="inline-flex items-center gap-2 text-blue-600 font-bold"
-                  >
+                  <button type="button" onClick={addSpotRow} className="inline-flex items-center gap-2 text-blue-600 font-bold">
                     <Plus size={18} /> 新增景點
                   </button>
                 </div>
@@ -306,7 +439,7 @@ export default function Home() {
                       : "bg-white text-slate-700 border-slate-200"
                   }`}
                 >
-                  推薦（住市中心附近）
+                  推薦（市中心/交通便利）
                 </button>
                 <button
                   type="button"
@@ -336,12 +469,12 @@ export default function Home() {
               className="md:col-span-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg"
             >
               {loading ? <Loader2 className="animate-spin" /> : <Sparkles size={18} />}
-              {loading ? "AI 正在生成時間行程表..." : "生成可編輯行程表"}
+              {loading ? "AI 正在生成時間行程表..." : "生成可切換行程表"}
             </button>
           </div>
         </div>
 
-        {/* 結果顯示（可編輯） */}
+        {/* 結果（可編輯 + A/B 切換） */}
         {result && (
           <div className="space-y-6">
             <h2 className="text-3xl font-bold text-center text-slate-800 mb-8">{result.title}</h2>
@@ -352,60 +485,118 @@ export default function Home() {
                   <span className="bg-blue-600 text-white px-4 py-1 rounded-full font-black text-sm">
                     DAY {day.day}
                   </span>
-                  <span className="text-slate-400 text-sm">（點文字可直接修改）</span>
+                  <span className="text-slate-400 text-sm">（不同類型有不同顏色；A/B 可直接切換）</span>
                 </div>
 
                 <div className="space-y-4">
-                  {day.blocks?.map((b) => (
-                    <div key={b.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-4">
-                      <div className="flex flex-col md:flex-row md:items-center gap-3">
-                        <div className="flex items-center gap-2">
-                          <input
-                            className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
-                            value={b.timeStart}
-                            onChange={(e) => updateBlock(dayIndex, b.id, { timeStart: e.target.value })}
-                          />
-                          <span className="text-slate-400">—</span>
-                          <input
-                            className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
-                            value={b.timeEnd}
-                            onChange={(e) => updateBlock(dayIndex, b.id, { timeEnd: e.target.value })}
-                          />
-                        </div>
+                  {day.blocks?.map((b) => {
+                    const meta = typeMeta[b.type];
+                    const Icon = meta.icon;
+                    const hasOptions = (b.type === "spot" || b.type === "meal" || b.type === "hotel") && b.options?.length;
 
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2 text-slate-500 text-xs font-bold uppercase tracking-wider">
-                            <Pencil size={14} />
-                            {b.type}
+                    const selected =
+                      hasOptions ? b.options!.find((o) => o.label === (b.selectedOption ?? "A")) : null;
+
+                    return (
+                      <div key={b.id} className={`rounded-2xl border p-4 ${meta.bg}`}>
+                        <div className="flex items-start gap-3">
+                          <div className={`shrink-0 w-10 h-10 rounded-2xl ${meta.chip} flex items-center justify-center`}>
+                            <Icon size={18} className="text-white" />
                           </div>
 
-                          <input
-                            className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-bold text-slate-800"
-                            value={b.title}
-                            onChange={(e) => updateBlock(dayIndex, b.id, { title: e.target.value })}
-                          />
+                          <div className="flex-1">
+                            {/* header row */}
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
+                                  value={b.timeStart}
+                                  onChange={(e) => updateBlock(dayIndex, b.id, { timeStart: e.target.value })}
+                                />
+                                <span className="text-slate-400">—</span>
+                                <input
+                                  className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
+                                  value={b.timeEnd}
+                                  onChange={(e) => updateBlock(dayIndex, b.id, { timeEnd: e.target.value })}
+                                />
+                                <span className="ml-2 text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                  <Pencil size={14} /> {meta.label}
+                                </span>
+                              </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                            <input
-                              className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
-                              placeholder="地點/區域（可留空）"
-                              value={b.place ?? ""}
-                              onChange={(e) => updateBlock(dayIndex, b.id, { place: e.target.value })}
-                            />
-                            <input
-                              className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
-                              placeholder="備註（可留空）"
-                              value={b.note ?? ""}
-                              onChange={(e) => updateBlock(dayIndex, b.id, { note: e.target.value })}
-                            />
+                              {/* A/B switch + score */}
+                              {hasOptions && selected && (
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="inline-flex rounded-xl border border-slate-200 overflow-hidden bg-white">
+                                    <button
+                                      type="button"
+                                      onClick={() => switchOption(dayIndex, b.id, "A")}
+                                      className={`px-3 py-2 text-sm font-black ${
+                                        b.selectedOption === "A" ? "bg-slate-900 text-white" : "text-slate-700"
+                                      }`}
+                                    >
+                                      A
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => switchOption(dayIndex, b.id, "B")}
+                                      className={`px-3 py-2 text-sm font-black ${
+                                        b.selectedOption === "B" ? "bg-slate-900 text-white" : "text-slate-700"
+                                      }`}
+                                    >
+                                      B
+                                    </button>
+                                  </div>
+
+                                  <div className="px-3 py-2 rounded-xl bg-white border border-slate-200">
+                                    <div className="text-xs text-slate-500 font-bold">推薦指數</div>
+                                    <div className="font-black text-slate-900">
+                                      {selected.score} <span className="text-slate-400 text-sm">/100</span>{" "}
+                                      <span className="ml-2 text-xs text-slate-500 font-bold">({scoreLabel(selected.score)})</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* title */}
+                            <div className="mt-3">
+                              <input
+                                className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-black text-slate-800"
+                                value={b.title}
+                                onChange={(e) => updateBlock(dayIndex, b.id, { title: e.target.value })}
+                              />
+                            </div>
+
+                            {/* place + note */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                              <input
+                                className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
+                                placeholder="地點/區域（可留空）"
+                                value={b.place ?? ""}
+                                onChange={(e) => updateBlock(dayIndex, b.id, { place: e.target.value })}
+                              />
+                              <input
+                                className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
+                                placeholder="備註（可留空）"
+                                value={b.note ?? ""}
+                                onChange={(e) => updateBlock(dayIndex, b.id, { note: e.target.value })}
+                              />
+                            </div>
+
+                            {/* reason */}
+                            {hasOptions && selected && (
+                              <div className="mt-3 rounded-2xl bg-white border border-slate-200 p-3">
+                                <div className="text-xs font-black text-slate-500 mb-1">推薦原因（A/B 各自不同）</div>
+                                <div className="text-sm text-slate-700 leading-relaxed">{selected.reason}</div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
-
-                {/* 你之後可以在這裡加：新增一個 block / 重新生成某個 block 的「換一個」 */}
               </div>
             ))}
           </div>
