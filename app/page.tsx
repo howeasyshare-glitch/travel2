@@ -17,6 +17,7 @@ import {
   Bus,
   Route as RouteIcon,
   Coffee,
+  Clock,
 } from "lucide-react";
 
 type Mode = "recommend" | "custom";
@@ -24,6 +25,7 @@ type Pace = "packed" | "normal" | "relaxed";
 type Transport = "drive" | "transit";
 type BlockType = "arrival" | "spot" | "meal" | "hotel" | "move" | "free";
 type Source = "user" | "ai";
+type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 
 type Option = {
   label: "A" | "B";
@@ -32,7 +34,7 @@ type Option = {
   note?: string;
   score: number; // 0-100
   reason: string;
-  source: Source; // user/ai
+  source: Source;
 };
 
 type MoveMeta = {
@@ -52,14 +54,16 @@ type ItineraryBlock = {
   place?: string;
   note?: string;
 
-  // 顯示「自訂」標示
   source?: Source;
 
-  // spot/meal/hotel 用
+  // spot/meal/hotel
   options?: Option[];
   selectedOption?: "A" | "B";
 
-  // move 用
+  // meal
+  mealType?: MealType;
+
+  // move
   move?: MoveMeta;
 };
 
@@ -72,6 +76,7 @@ type Itinerary = {
   title: string;
   assumptions?: {
     startTime?: string;
+    endTime?: string;
     pace?: Pace;
     transport?: Transport;
   };
@@ -145,6 +150,15 @@ const shiftBlockTime = (b: ItineraryBlock, deltaMin: number): ItineraryBlock => 
   return { ...b, timeStart: toHHMM(s), timeEnd: toHHMM(e) };
 };
 
+const clampTimeWindow = (b: ItineraryBlock, dayStartMin: number, dayEndMin: number) => {
+  const s = toMin(b.timeStart);
+  const e = toMin(b.timeEnd);
+  // 只做最基本保底：不小於 dayStart；不大於 dayEnd
+  const ns = Math.max(s, dayStartMin);
+  const ne = Math.min(e, dayEndMin);
+  return { ...b, timeStart: toHHMM(ns), timeEnd: toHHMM(Math.max(ne, ns)) };
+};
+
 export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<Itinerary | null>(null);
@@ -156,6 +170,8 @@ export default function Home() {
     children: 0,
     pace: "normal" as Pace,
     transport: "transit" as Transport,
+    startTime: "09:30",
+    endTime: "21:00",
     meals: { mode: "recommend" as Mode, customText: "" },
     hotel: { mode: "recommend" as Mode, customText: "" },
     spots: { mode: "custom" as Mode, customList: ["景點1", "景點2"] as string[] },
@@ -165,6 +181,10 @@ export default function Home() {
     if (!form.location) return false;
     if (form.days < 1) return false;
     if (form.adults < 1) return false;
+
+    // start/end time basic sanity
+    if (!/^\d{2}:\d{2}$/.test(form.startTime) || !/^\d{2}:\d{2}$/.test(form.endTime)) return false;
+    if (toMin(form.endTime) <= toMin(form.startTime)) return false;
 
     if (form.hotel.mode === "custom" && !form.hotel.customText.trim()) return false;
     if (form.meals.mode === "custom" && !form.meals.customText.trim()) return false;
@@ -178,7 +198,6 @@ export default function Home() {
   }, [form]);
 
   const normalizeItinerary = (parsed: Itinerary) => {
-    // 保底：若 AI 給了 options + selectedOption，確保 block 內容同步到選中的 option
     parsed.days?.forEach((d) => {
       d.blocks?.forEach((b) => {
         if ((b.type === "spot" || b.type === "meal" || b.type === "hotel") && b.options?.length) {
@@ -189,8 +208,9 @@ export default function Home() {
           b.place = opt.place;
           b.note = opt.note;
         }
-        // move block：如果有 durationMin，但 timeEnd 不合理，不在這裡修（交給 AI），只顯示
       });
+      // 確保顯示順序按時間
+      d.blocks = [...(d.blocks ?? [])].sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
     });
     return parsed;
   };
@@ -230,6 +250,7 @@ export default function Home() {
       const idx = day.blocks.findIndex((b) => b.id === blockId);
       if (idx === -1) return prev;
       day.blocks[idx] = { ...day.blocks[idx], ...patch };
+      day.blocks = [...day.blocks].sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
       return next;
     });
   };
@@ -257,7 +278,7 @@ export default function Home() {
     });
   };
 
-  // ✅ 刪除 block + 後面全部往前移（預設 ripple）
+  // ✅ 修正版：刪除後 ripple（只移動刪除區間之後的 blocks）+ 只刪貼齊的 move + 排序
   const deleteBlockWithRipple = (dayIndex: number, blockId: string) => {
     setResult((prev) => {
       if (!prev) return prev;
@@ -268,38 +289,45 @@ export default function Home() {
       if (idx === -1) return prev;
 
       const target = day.blocks[idx];
-      const gap = toMin(target.timeEnd) - toMin(target.timeStart);
       const targetStart = toMin(target.timeStart);
+      const targetEnd = toMin(target.timeEnd);
+      const gap = Math.max(0, targetEnd - targetStart);
 
       // 1) 刪掉目標 block
       day.blocks.splice(idx, 1);
 
-      // 2) 盡量清掉相鄰 move（避免孤兒 move）
-      const removeNeighborMove = (pos: number) => {
-        if (pos >= 0 && pos < day.blocks.length && day.blocks[pos].type === "move") {
-          day.blocks.splice(pos, 1);
-          return true;
-        }
-        return false;
-      };
-      // 先刪後面的，再刪前面的（索引較安全）
-      removeNeighborMove(idx);
-      removeNeighborMove(idx - 1);
+      // 2) 刪掉「緊貼刪除區間」的 move（更安全：只刪 time 對得上的）
+      day.blocks = day.blocks.filter((b) => {
+        if (b.type !== "move") return true;
+        const ms = toMin(b.timeStart);
+        const me = toMin(b.timeEnd);
+        // move 結束剛好貼到 targetStart 或開始剛好貼到 targetEnd → 一起刪
+        if (me === targetStart || ms === targetEnd) return false;
+        // move 完全落在刪除區間內 → 刪
+        if (ms >= targetStart && me <= targetEnd) return false;
+        return true;
+      });
 
-      // 3) ripple：把原本在 target 之後開始的 blocks 全部往前移 gap
+      // 3) ripple：只把「在 targetEnd 之後開始」的 blocks 往前移 gap
       day.blocks = day.blocks.map((b) => {
         const bStart = toMin(b.timeStart);
-        if (bStart >= targetStart) {
-          return shiftBlockTime(b, -gap);
-        }
+        if (bStart >= targetEnd) return shiftBlockTime(b, -gap);
         return b;
       });
+
+      // 4) 保底：依時間排序 + 夾到日開始/結束（避免變怪）
+      const dayStartMin = toMin(form.startTime);
+      const dayEndMin = toMin(form.endTime);
+
+      day.blocks = day.blocks
+        .map((b) => clampTimeWindow(b, dayStartMin, dayEndMin))
+        .sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
 
       return next;
     });
   };
 
-  // ✅ 在某個 block 後新增一個 block（預設 free 60 分鐘，自訂來源 = user）
+  // ✅ 新增：在某 block 後插入一個 60 分鐘 free（自訂）
   const addBlockAfter = (dayIndex: number, afterBlockId: string) => {
     setResult((prev) => {
       if (!prev) return prev;
@@ -325,6 +353,7 @@ export default function Home() {
       };
 
       day.blocks.splice(idx + 1, 0, newBlock);
+      day.blocks = [...day.blocks].sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
       return next;
     });
   };
@@ -386,7 +415,7 @@ export default function Home() {
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-slate-900 mb-2">專業 AI 旅程助手</h1>
-          <p className="text-slate-500">節奏 / 交通 / 自訂 → 生成可切換 + 可編輯 + 可增刪的時間行程表</p>
+          <p className="text-slate-500">自訂時間窗 / 午餐時段 / 刪除 ripple 修正 / 欄位說明更清楚</p>
         </div>
 
         {/* 表單 */}
@@ -404,6 +433,34 @@ export default function Home() {
                   onChange={(e) => setForm({ ...form, location: e.target.value })}
                 />
               </div>
+            </div>
+
+            {/* 每日時間窗 */}
+            <div className="md:col-span-2">
+              <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                <Clock size={16} /> 每日行程時間窗
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="bg-slate-100 rounded-2xl p-4 border border-slate-200">
+                  <div className="text-xs font-black text-slate-500 mb-2">開始時間</div>
+                  <input
+                    type="time"
+                    className="w-full bg-white rounded-xl px-4 py-3 outline-none font-mono border border-slate-200"
+                    value={form.startTime}
+                    onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                  />
+                </div>
+                <div className="bg-slate-100 rounded-2xl p-4 border border-slate-200">
+                  <div className="text-xs font-black text-slate-500 mb-2">結束時間</div>
+                  <input
+                    type="time"
+                    className="w-full bg-white rounded-xl px-4 py-3 outline-none font-mono border border-slate-200"
+                    value={form.endTime}
+                    onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 mt-2">會要求 AI 在此時間範圍內安排（並盡量把午餐安排在 11:30–12:30 開始）。</p>
             </div>
 
             {/* 節奏 */}
@@ -463,7 +520,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 三餐：推薦/自訂 */}
+            {/* 三餐 */}
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                 <Utensils size={16} /> 三餐（餐廳）
@@ -502,7 +559,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* 景點：推薦/自訂 */}
+            {/* 景點 */}
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                 <Landmark size={16} /> 景點
@@ -566,7 +623,7 @@ export default function Home() {
               )}
             </div>
 
-            {/* 旅館：推薦/自訂 */}
+            {/* 旅館 */}
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                 <Hotel size={16} /> 旅館
@@ -627,7 +684,7 @@ export default function Home() {
                   <span className="bg-blue-600 text-white px-4 py-1 rounded-full font-black text-sm">
                     DAY {day.day}
                   </span>
-                  <span className="text-slate-400 text-sm">（🗑 刪除會預設把後面往前移；➕ 可插入新活動）</span>
+                  <span className="text-slate-400 text-sm">（🗑 刪除：預設把後面往前移；➕ 插入新活動）</span>
                 </div>
 
                 <div className="space-y-4">
@@ -668,9 +725,20 @@ export default function Home() {
                                   <span className="ml-2 text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
                                     <Pencil size={14} /> {meta.label}
                                   </span>
+
+                                  {b.type === "meal" && b.mealType && (
+                                    <span className="ml-2 px-2 py-1 rounded-full text-xs font-black bg-white border border-slate-200 text-slate-700">
+                                      {b.mealType === "lunch"
+                                        ? "午餐"
+                                        : b.mealType === "dinner"
+                                        ? "晚餐"
+                                        : b.mealType === "breakfast"
+                                        ? "早餐"
+                                        : "點心"}
+                                    </span>
+                                  )}
                                 </div>
 
-                                {/* 自訂標示 */}
                                 <div className="flex items-center gap-2">
                                   {b.source === "user" && (
                                     <span className="px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white">
@@ -687,7 +755,7 @@ export default function Home() {
                                 </div>
                               </div>
 
-                              {/* buttons + AB */}
+                              {/* actions + AB */}
                               <div className="flex flex-wrap items-center gap-2">
                                 <button
                                   type="button"
@@ -744,62 +812,68 @@ export default function Home() {
                               </div>
                             </div>
 
-                            {/* title */}
-                            <div className="mt-3">
-                              <input
-                                className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-black text-slate-800"
-                                value={b.title}
-                                onChange={(e) => updateBlock(dayIndex, b.id, { title: e.target.value })}
-                              />
-                            </div>
-
-                            {/* place + note */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
-                              <input
-                                className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
-                                placeholder="地點/區域（可留空）"
-                                value={b.place ?? ""}
-                                onChange={(e) => updateBlock(dayIndex, b.id, { place: e.target.value })}
-                              />
-                              <input
-                                className="w-full bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
-                                placeholder="備註（可留空）"
-                                value={b.note ?? ""}
-                                onChange={(e) => updateBlock(dayIndex, b.id, { note: e.target.value })}
-                              />
-                            </div>
-
-                            {/* move 額外資訊 */}
-                            {b.type === "move" && b.move && (
-                              <div className="mt-3 rounded-2xl bg-white border border-slate-200 p-3">
-                                <div className="text-xs font-black text-slate-500 mb-1">到下一站預估時間</div>
-                                <div className="text-sm text-slate-700 leading-relaxed">
-                                  {b.move.mode === "drive" ? "自駕" : "大眾運輸"} 約 {b.move.durationMin} 分鐘
-                                  {(b.move.from || b.move.to) ? (
-                                    <span className="text-slate-500">
-                                      {" "}
-                                      ・{b.move.from ? `從 ${b.move.from}` : ""}{b.move.from && b.move.to ? " → " : ""}
-                                      {b.move.to ? `到 ${b.move.to}` : ""}
-                                    </span>
-                                  ) : null}
-                                </div>
+                            {/* 四格資訊：更清楚的標籤 */}
+                            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                <div className="text-xs font-black text-slate-500 mb-2">活動名稱</div>
+                                <input
+                                  className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none font-black text-slate-800"
+                                  value={b.title}
+                                  onChange={(e) => updateBlock(dayIndex, b.id, { title: e.target.value })}
+                                />
                               </div>
-                            )}
 
-                            {/* reason */}
-                            {hasOptions && selected && (
-                              <div className="mt-3 rounded-2xl bg-white border border-slate-200 p-3">
-                                <div className="text-xs font-black text-slate-500 mb-1">推薦原因</div>
-                                <div className="text-sm text-slate-700 leading-relaxed">
-                                  {selected.reason}
-                                  {selected.source === "user" && (
-                                    <span className="ml-2 inline-block px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white">
-                                      使用者指定
-                                    </span>
-                                  )}
-                                </div>
+                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                <div className="text-xs font-black text-slate-500 mb-2">地點 / 區域</div>
+                                <input
+                                  className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
+                                  value={b.place ?? ""}
+                                  onChange={(e) => updateBlock(dayIndex, b.id, { place: e.target.value })}
+                                />
                               </div>
-                            )}
+
+                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                <div className="text-xs font-black text-slate-500 mb-2">
+                                  小提醒（例如：排隊、人潮、親子、換乘）
+                                </div>
+                                <input
+                                  className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
+                                  value={b.note ?? ""}
+                                  onChange={(e) => updateBlock(dayIndex, b.id, { note: e.target.value })}
+                                />
+                              </div>
+
+                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                <div className="text-xs font-black text-slate-500 mb-2">
+                                  {b.type === "move" ? "到下一站預估時間" : hasOptions ? "推薦理由（A/B 各自不同）" : "補充資訊"}
+                                </div>
+
+                                {b.type === "move" && b.move ? (
+                                  <div className="text-sm text-slate-700">
+                                    {(b.move.mode === "drive" ? "自駕" : "大眾運輸") + " 約 "}
+                                    <span className="font-black">{b.move.durationMin}</span> 分鐘
+                                    {(b.move.from || b.move.to) ? (
+                                      <div className="text-xs text-slate-500 mt-1">
+                                        {b.move.from ? `從 ${b.move.from}` : ""}
+                                        {b.move.from && b.move.to ? " → " : ""}
+                                        {b.move.to ? `到 ${b.move.to}` : ""}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : hasOptions && selected ? (
+                                  <div className="text-sm text-slate-700 leading-relaxed">
+                                    {selected.reason}
+                                    {selected.source === "user" && (
+                                      <span className="ml-2 inline-block px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white">
+                                        使用者指定
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="text-sm text-slate-500">—</div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
