@@ -148,7 +148,7 @@ export async function POST(req: Request) {
   ]
 }
 
-請嚴格只輸出 JSON。
+請嚴格只輸出 JSON。 
 `;
 
     const result = await model.generateContent(prompt);
