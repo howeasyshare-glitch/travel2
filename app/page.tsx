@@ -864,7 +864,7 @@ export default function Home() {
                                   <div className="text-sm text-slate-700 leading-relaxed">
                                     {selected.reason}
                                     {selected.source === "user" && (
-                                      <span className="ml-2 inline-block px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white">
+                                      <span className="ml-2 inline-block px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white"> 
                                         使用者指定
                                       </span>
                                     )}
