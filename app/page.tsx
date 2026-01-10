@@ -18,6 +18,10 @@ import {
   Route as RouteIcon,
   Coffee,
   Clock,
+  AlertTriangle,
+  Download,
+  RefreshCw,
+  Map as MapIcon,
 } from "lucide-react";
 
 type Mode = "recommend" | "custom";
@@ -32,7 +36,7 @@ type Option = {
   title: string;
   place?: string;
   note?: string;
-  score: number; // 0-100
+  score: number;
   reason: string;
   source: Source;
 };
@@ -42,12 +46,13 @@ type MoveMeta = {
   durationMin: number;
   from?: string;
   to?: string;
+  needsUpdate?: boolean; // ✅ 刪除保留空格時，交通可能需要更新
 };
 
 type ItineraryBlock = {
   id: string;
-  timeStart: string; // "HH:MM"
-  timeEnd: string; // "HH:MM"
+  timeStart: string;
+  timeEnd: string;
   type: BlockType;
 
   title: string;
@@ -56,14 +61,11 @@ type ItineraryBlock = {
 
   source?: Source;
 
-  // spot/meal/hotel
   options?: Option[];
   selectedOption?: "A" | "B";
 
-  // meal
   mealType?: MealType;
 
-  // move
   move?: MoveMeta;
 };
 
@@ -83,46 +85,13 @@ type Itinerary = {
   days: ItineraryDay[];
 };
 
-const typeMeta: Record<
-  BlockType,
-  { label: string; icon: any; bg: string; chip: string }
-> = {
-  arrival: {
-    label: "抵達/開始",
-    icon: Flag,
-    bg: "bg-indigo-50 border-indigo-100",
-    chip: "bg-indigo-600",
-  },
-  spot: {
-    label: "景點",
-    icon: Landmark,
-    bg: "bg-emerald-50 border-emerald-100",
-    chip: "bg-emerald-600",
-  },
-  meal: {
-    label: "餐廳/用餐",
-    icon: Utensils,
-    bg: "bg-orange-50 border-orange-100",
-    chip: "bg-orange-600",
-  },
-  hotel: {
-    label: "住宿/Check-in",
-    icon: Hotel,
-    bg: "bg-blue-50 border-blue-100",
-    chip: "bg-blue-600",
-  },
-  move: {
-    label: "移動/交通",
-    icon: RouteIcon,
-    bg: "bg-slate-50 border-slate-200",
-    chip: "bg-slate-800",
-  },
-  free: {
-    label: "自由活動",
-    icon: Coffee,
-    bg: "bg-violet-50 border-violet-100",
-    chip: "bg-violet-600",
-  },
+const typeMeta: Record<BlockType, { label: string; icon: any; bg: string; chip: string }> = {
+  arrival: { label: "抵達/開始", icon: Flag, bg: "bg-indigo-50 border-indigo-100", chip: "bg-indigo-600" },
+  spot: { label: "景點", icon: Landmark, bg: "bg-emerald-50 border-emerald-100", chip: "bg-emerald-600" },
+  meal: { label: "餐廳/用餐", icon: Utensils, bg: "bg-orange-50 border-orange-100", chip: "bg-orange-600" },
+  hotel: { label: "住宿/Check-in", icon: Hotel, bg: "bg-blue-50 border-blue-100", chip: "bg-blue-600" },
+  move: { label: "移動/交通", icon: RouteIcon, bg: "bg-slate-50 border-slate-200", chip: "bg-slate-800" },
+  free: { label: "自由/待安排", icon: Coffee, bg: "bg-violet-50 border-violet-100", chip: "bg-violet-600" },
 };
 
 function scoreLabel(score: number) {
@@ -144,23 +113,163 @@ const toHHMM = (min: number) => {
   return `${hh}:${mm}`;
 };
 
-const shiftBlockTime = (b: ItineraryBlock, deltaMin: number): ItineraryBlock => {
-  const s = toMin(b.timeStart) + deltaMin;
-  const e = toMin(b.timeEnd) + deltaMin;
-  return { ...b, timeStart: toHHMM(s), timeEnd: toHHMM(e) };
+// ✅ 時間吸附：預設 5 分鐘
+const snapMinutes = (hhmm: string, step = 5) => {
+  if (!/^\d{2}:\d{2}$/.test(hhmm)) return hhmm;
+  const m = toMin(hhmm);
+  const snapped = Math.round(m / step) * step;
+  return toHHMM(snapped);
 };
 
-const clampTimeWindow = (b: ItineraryBlock, dayStartMin: number, dayEndMin: number) => {
-  const s = toMin(b.timeStart);
-  const e = toMin(b.timeEnd);
-  // 只做最基本保底：不小於 dayStart；不大於 dayEnd
-  const ns = Math.max(s, dayStartMin);
-  const ne = Math.min(e, dayEndMin);
-  return { ...b, timeStart: toHHMM(ns), timeEnd: toHHMM(Math.max(ne, ns)) };
+// ✅ 取得地圖查詢字串（place 優先，否則 title）
+const mapQuery = (b: ItineraryBlock) => {
+  const q = (b.place?.trim() || b.title?.trim() || "").trim();
+  return q;
+};
+
+const openMap = (b: ItineraryBlock) => {
+  const q = mapQuery(b);
+  if (!q) return;
+  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
+// ✅ 產 CSV 下載（簡單版）
+const downloadCSV = (it: Itinerary) => {
+  const rows: string[][] = [["Day", "Start", "End", "Type", "Title", "Place", "Note"]];
+  it.days.forEach((d) => {
+    d.blocks
+      .slice()
+      .sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart))
+      .forEach((b) => {
+        rows.push([
+          String(d.day),
+          b.timeStart,
+          b.timeEnd,
+          b.type,
+          b.title ?? "",
+          b.place ?? "",
+          b.note ?? "",
+        ]);
+      });
+  });
+
+  const csv = rows
+    .map((r) =>
+      r
+        .map((cell) => `"${String(cell).replaceAll(`"`, `""`)}"`)
+        .join(",")
+    )
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "itinerary.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// ✅ 產 ICS 下載（簡單：用「今天」當日期基準 + Day offset）
+// 你之後可加「出發日期」讓它更準
+const downloadICS = (it: Itinerary) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+
+  const toICSDateTime = (date: Date) => {
+    // 以 local time 直接輸出（不轉 UTC，簡化；Google Calendar 通常可解析）
+    const y = date.getFullYear();
+    const mo = pad(date.getMonth() + 1);
+    const d = pad(date.getDate());
+    const h = pad(date.getHours());
+    const mi = pad(date.getMinutes());
+    const s = pad(date.getSeconds());
+    return `${y}${mo}${d}T${h}${mi}${s}`;
+  };
+
+  const lines: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//AI Itinerary//TW//EN",
+    "CALSCALE:GREGORIAN",
+  ];
+
+  it.days.forEach((day) => {
+    const dayDate = new Date(base.getTime());
+    dayDate.setDate(base.getDate() + (day.day - 1));
+
+    day.blocks
+      .slice()
+      .sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart))
+      .forEach((b) => {
+        const [sh, sm] = b.timeStart.split(":").map(Number);
+        const [eh, em] = b.timeEnd.split(":").map(Number);
+
+        const dtStart = new Date(dayDate.getTime());
+        dtStart.setHours(sh, sm, 0, 0);
+
+        const dtEnd = new Date(dayDate.getTime());
+        dtEnd.setHours(eh, em, 0, 0);
+
+        const uid = `${b.id}-${day.day}@ai-itinerary`;
+
+        const summary = b.title?.replace(/\n/g, " ") || "Event";
+        const location = (b.place || "").replace(/\n/g, " ");
+        const description = (b.note || "").replace(/\n/g, " ");
+
+        lines.push("BEGIN:VEVENT");
+        lines.push(`UID:${uid}`);
+        lines.push(`DTSTAMP:${toICSDateTime(new Date())}`);
+        lines.push(`DTSTART:${toICSDateTime(dtStart)}`);
+        lines.push(`DTEND:${toICSDateTime(dtEnd)}`);
+        lines.push(`SUMMARY:${summary}`);
+        if (location) lines.push(`LOCATION:${location}`);
+        if (description) lines.push(`DESCRIPTION:${description}`);
+        lines.push("END:VEVENT");
+      });
+  });
+
+  lines.push("END:VCALENDAR");
+
+  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "itinerary.ics";
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// ✅ 檢查時間衝突：回傳 blockId -> message
+const detectConflicts = (day: ItineraryDay) => {
+  const sorted = day.blocks.slice().sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
+  const conflicts = new Map<string, string>();
+
+  for (let i = 0; i < sorted.length; i++) {
+    const b = sorted[i];
+    const s = toMin(b.timeStart);
+    const e = toMin(b.timeEnd);
+
+    if (e <= s) conflicts.set(b.id, "結束時間需晚於開始時間");
+
+    if (i > 0) {
+      const prev = sorted[i - 1];
+      const ps = toMin(prev.timeStart);
+      const pe = toMin(prev.timeEnd);
+      if (s < pe) {
+        conflicts.set(b.id, "與上一段時間重疊");
+        conflicts.set(prev.id, conflicts.get(prev.id) || "與下一段時間重疊");
+      }
+      // 檢查是否有空洞（不是錯誤，只提示）
+    }
+  }
+  return conflicts;
 };
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
+  const [reflowing, setReflowing] = useState<{ dayIndex: number } | null>(null);
   const [result, setResult] = useState<Itinerary | null>(null);
 
   const [form, setForm] = useState({
@@ -182,7 +291,6 @@ export default function Home() {
     if (form.days < 1) return false;
     if (form.adults < 1) return false;
 
-    // start/end time basic sanity
     if (!/^\d{2}:\d{2}$/.test(form.startTime) || !/^\d{2}:\d{2}$/.test(form.endTime)) return false;
     if (toMin(form.endTime) <= toMin(form.startTime)) return false;
 
@@ -208,10 +316,22 @@ export default function Home() {
           b.place = opt.place;
           b.note = opt.note;
         }
+        // ✅ 時間吸附（保底：只做 normalize 時做一次）
+        b.timeStart = snapMinutes(b.timeStart, 5);
+        b.timeEnd = snapMinutes(b.timeEnd, 5);
       });
-      // 確保顯示順序按時間
+
       d.blocks = [...(d.blocks ?? [])].sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
     });
+
+    parsed.assumptions = {
+      ...(parsed.assumptions ?? {}),
+      startTime: form.startTime,
+      endTime: form.endTime,
+      pace: form.pace,
+      transport: form.transport,
+    };
+
     return parsed;
   };
 
@@ -249,7 +369,13 @@ export default function Home() {
       const day = next.days[dayIndex];
       const idx = day.blocks.findIndex((b) => b.id === blockId);
       if (idx === -1) return prev;
-      day.blocks[idx] = { ...day.blocks[idx], ...patch };
+
+      // ✅ 時間吸附：若在更新 timeStart/timeEnd，就吸附到 5 分鐘刻度
+      const p = { ...patch } as any;
+      if (typeof p.timeStart === "string") p.timeStart = snapMinutes(p.timeStart, 5);
+      if (typeof p.timeEnd === "string") p.timeEnd = snapMinutes(p.timeEnd, 5);
+
+      day.blocks[idx] = { ...day.blocks[idx], ...p };
       day.blocks = [...day.blocks].sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
       return next;
     });
@@ -278,8 +404,8 @@ export default function Home() {
     });
   };
 
-  // ✅ 修正版：刪除後 ripple（只移動刪除區間之後的 blocks）+ 只刪貼齊的 move + 排序
-  const deleteBlockWithRipple = (dayIndex: number, blockId: string) => {
+  // ✅ 刪除 = 保留原時段空格（占位），後面不動
+  const deleteBlockKeepGap = (dayIndex: number, blockId: string) => {
     setResult((prev) => {
       if (!prev) return prev;
       const next = structuredClone(prev);
@@ -289,40 +415,33 @@ export default function Home() {
       if (idx === -1) return prev;
 
       const target = day.blocks[idx];
-      const targetStart = toMin(target.timeStart);
-      const targetEnd = toMin(target.timeEnd);
-      const gap = Math.max(0, targetEnd - targetStart);
 
-      // 1) 刪掉目標 block
-      day.blocks.splice(idx, 1);
+      // 把該 block 轉為 free 占位，不改時間
+      day.blocks[idx] = {
+        ...target,
+        type: "free",
+        title: "空檔（待安排）",
+        place: "",
+        note: "你可以在此插入新活動，或按「重排這一天」自動補齊。",
+        source: "user",
+        options: undefined,
+        selectedOption: undefined,
+        mealType: undefined,
+      };
 
-      // 2) 刪掉「緊貼刪除區間」的 move（更安全：只刪 time 對得上的）
-      day.blocks = day.blocks.filter((b) => {
-        if (b.type !== "move") return true;
-        const ms = toMin(b.timeStart);
-        const me = toMin(b.timeEnd);
-        // move 結束剛好貼到 targetStart 或開始剛好貼到 targetEnd → 一起刪
-        if (me === targetStart || ms === targetEnd) return false;
-        // move 完全落在刪除區間內 → 刪
-        if (ms >= targetStart && me <= targetEnd) return false;
-        return true;
-      });
+      // 相鄰 move 標記 needsUpdate（時間保留）
+      const markMove = (pos: number) => {
+        if (pos >= 0 && pos < day.blocks.length && day.blocks[pos].type === "move") {
+          day.blocks[pos].move = { ...(day.blocks[pos].move ?? { mode: form.transport, durationMin: 10 }), needsUpdate: true };
+          day.blocks[pos].title = "移動（需更新目的地）";
+          day.blocks[pos].note = "前後活動已變更，建議重排此段交通。";
+          day.blocks[pos].source = "ai";
+        }
+      };
+      markMove(idx - 1);
+      markMove(idx + 1);
 
-      // 3) ripple：只把「在 targetEnd 之後開始」的 blocks 往前移 gap
-      day.blocks = day.blocks.map((b) => {
-        const bStart = toMin(b.timeStart);
-        if (bStart >= targetEnd) return shiftBlockTime(b, -gap);
-        return b;
-      });
-
-      // 4) 保底：依時間排序 + 夾到日開始/結束（避免變怪）
-      const dayStartMin = toMin(form.startTime);
-      const dayEndMin = toMin(form.endTime);
-
-      day.blocks = day.blocks
-        .map((b) => clampTimeWindow(b, dayStartMin, dayEndMin))
-        .sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
-
+      day.blocks = [...day.blocks].sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
       return next;
     });
   };
@@ -346,9 +465,9 @@ export default function Home() {
         timeStart: toHHMM(start),
         timeEnd: toHHMM(end),
         type: "free",
-        title: "自由活動（可改成景點/餐廳/飯店）",
+        title: "空檔（待安排）",
         place: "",
-        note: "",
+        note: "可改成景點/餐廳/飯店，或按重排自動填入",
         source: "user",
       };
 
@@ -378,9 +497,7 @@ export default function Home() {
         type="button"
         onClick={() => setForm({ ...form, pace: value })}
         className={`flex-1 p-3 rounded-2xl border text-left transition ${
-          active
-            ? "bg-blue-600 text-white border-blue-600"
-            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+          active ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
         }`}
       >
         <div className="font-black">{label}</div>
@@ -396,9 +513,7 @@ export default function Home() {
         type="button"
         onClick={() => setForm({ ...form, transport: value })}
         className={`flex-1 p-3 rounded-2xl border text-left transition ${
-          active
-            ? "bg-slate-900 text-white border-slate-900"
-            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+          active ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
         }`}
       >
         <div className="flex items-center gap-2 font-black">
@@ -410,12 +525,63 @@ export default function Home() {
     );
   };
 
+  // ✅ 一鍵重排這一天（呼叫新 API）
+  const reflowDay = async (dayIndex: number) => {
+    if (!result) return;
+    setReflowing({ dayIndex });
+    try {
+      const day = result.days[dayIndex];
+
+      const resp = await fetch("/api/reflow-day", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          location: form.location,
+          pace: form.pace,
+          transport: form.transport,
+          startTime: form.startTime,
+          endTime: form.endTime,
+          hasKids: form.children > 0,
+          day,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err?.error || "reflow failed");
+      }
+
+      const data = await resp.json();
+      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const clean = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
+      const newDay = JSON.parse(clean) as ItineraryDay;
+
+      setResult((prev) => {
+        if (!prev) return prev;
+        const next = structuredClone(prev);
+        next.days[dayIndex] = {
+          ...newDay,
+          blocks: (newDay.blocks ?? []).map((b) => ({
+            ...b,
+            timeStart: snapMinutes(b.timeStart, 5),
+            timeEnd: snapMinutes(b.timeEnd, 5),
+          })),
+        };
+        return next;
+      });
+    } catch (e: any) {
+      alert("重排失敗: " + e.message);
+    } finally {
+      setReflowing(null);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 py-12 px-4">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-slate-900 mb-2">專業 AI 旅程助手</h1>
-          <p className="text-slate-500">自訂時間窗 / 午餐時段 / 刪除 ripple 修正 / 欄位說明更清楚</p>
+          <p className="text-slate-500">刪除保留空格 + 時間吸附 + 衝突警示 + 匯出 + 地圖 + 一鍵重排</p>
         </div>
 
         {/* 表單 */}
@@ -460,7 +626,7 @@ export default function Home() {
                   />
                 </div>
               </div>
-              <p className="text-xs text-slate-400 mt-2">會要求 AI 在此時間範圍內安排（並盡量把午餐安排在 11:30–12:30 開始）。</p>
+              <p className="text-xs text-slate-400 mt-2">午餐會盡量安排在 11:30–12:30 開始（若偏離會在小提醒說明）。</p>
             </div>
 
             {/* 節奏 */}
@@ -468,8 +634,8 @@ export default function Home() {
               <label className="block text-sm font-bold text-slate-700 mb-2">旅遊節奏</label>
               <div className="flex gap-3">
                 {paceButton("packed", "趕", "景點多、動線緊、停留短")}
-                {paceButton("normal", "一般", "平衡安排，彈性適中")}
-                {paceButton("relaxed", "悠閑", "停留久、留白多、慢慢玩")}
+                {paceButton("normal", "一般", "平衡安排")}
+                {paceButton("relaxed", "悠閑", "留白多、慢慢玩")}
               </div>
             </div>
 
@@ -477,8 +643,8 @@ export default function Home() {
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-slate-700 mb-2">交通方式</label>
               <div className="flex gap-3">
-                {transportButton("drive", "自駕", Car, "可跑郊區、移動彈性")}
-                {transportButton("transit", "大眾運輸", Bus, "以車站周邊、轉乘安排")}
+                {transportButton("drive", "自駕", Car, "彈性高")}
+                {transportButton("transit", "大眾運輸", Bus, "轉乘安排")}
               </div>
             </div>
 
@@ -530,9 +696,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setForm({ ...form, meals: { ...form.meals, mode: "recommend" } })}
                   className={`px-4 py-2 rounded-xl font-bold border ${
-                    form.meals.mode === "recommend"
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-700 border-slate-200"
+                    form.meals.mode === "recommend" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200"
                   }`}
                 >
                   推薦
@@ -541,9 +705,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setForm({ ...form, meals: { ...form.meals, mode: "custom" } })}
                   className={`px-4 py-2 rounded-xl font-bold border ${
-                    form.meals.mode === "custom"
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-700 border-slate-200"
+                    form.meals.mode === "custom" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200"
                   }`}
                 >
                   自訂
@@ -552,7 +714,7 @@ export default function Home() {
               {form.meals.mode === "custom" && (
                 <input
                   className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none"
-                  placeholder="例：想吃燒肉、不要海鮮、親子友善、清淡..."
+                  placeholder="例：想吃燒肉、不要海鮮、親子友善..."
                   value={form.meals.customText}
                   onChange={(e) => setForm({ ...form, meals: { ...form.meals, customText: e.target.value } })}
                 />
@@ -569,9 +731,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setForm({ ...form, spots: { ...form.spots, mode: "recommend" } })}
                   className={`px-4 py-2 rounded-xl font-bold border ${
-                    form.spots.mode === "recommend"
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-700 border-slate-200"
+                    form.spots.mode === "recommend" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200"
                   }`}
                 >
                   推薦
@@ -580,9 +740,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setForm({ ...form, spots: { ...form.spots, mode: "custom" } })}
                   className={`px-4 py-2 rounded-xl font-bold border ${
-                    form.spots.mode === "custom"
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-700 border-slate-200"
+                    form.spots.mode === "custom" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200"
                   }`}
                 >
                   自訂
@@ -633,9 +791,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setForm({ ...form, hotel: { ...form.hotel, mode: "recommend" } })}
                   className={`px-4 py-2 rounded-xl font-bold border ${
-                    form.hotel.mode === "recommend"
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-700 border-slate-200"
+                    form.hotel.mode === "recommend" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200"
                   }`}
                 >
                   推薦（市中心/交通便利）
@@ -644,9 +800,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setForm({ ...form, hotel: { ...form.hotel, mode: "custom" } })}
                   className={`px-4 py-2 rounded-xl font-bold border ${
-                    form.hotel.mode === "custom"
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-700 border-slate-200"
+                    form.hotel.mode === "custom" ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-700 border-slate-200"
                   }`}
                 >
                   自訂（指定旅館/條件）
@@ -655,7 +809,7 @@ export default function Home() {
               {form.hotel.mode === "custom" && (
                 <input
                   className="w-full bg-slate-100 rounded-xl px-4 py-3 outline-none"
-                  placeholder="例：想住 ABC 酒店 / 靠近市中心 / 靠近車站..."
+                  placeholder="例：想住 ABC 酒店 / 靠近市中心..."
                   value={form.hotel.customText}
                   onChange={(e) => setForm({ ...form, hotel: { ...form.hotel, customText: e.target.value } })}
                 />
@@ -676,212 +830,279 @@ export default function Home() {
         {/* 結果 */}
         {result && (
           <div className="space-y-6">
-            <h2 className="text-3xl font-bold text-center text-slate-800 mb-8">{result.title}</h2>
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <h2 className="text-3xl font-bold text-slate-800">{result.title}</h2>
 
-            {result.days?.map((day, dayIndex) => (
-              <div key={day.day} className="bg-white rounded-3xl p-8 shadow-md border border-slate-100">
-                <div className="flex items-center gap-3 mb-6">
-                  <span className="bg-blue-600 text-white px-4 py-1 rounded-full font-black text-sm">
-                    DAY {day.day}
-                  </span>
-                  <span className="text-slate-400 text-sm">（🗑 刪除：預設把後面往前移；➕ 插入新活動）</span>
-                </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadCSV(result)}
+                  className="px-4 py-3 rounded-2xl bg-white border border-slate-200 font-black text-slate-700 inline-flex items-center gap-2"
+                >
+                  <Download size={18} /> 匯出 CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={() => downloadICS(result)}
+                  className="px-4 py-3 rounded-2xl bg-white border border-slate-200 font-black text-slate-700 inline-flex items-center gap-2"
+                >
+                  <Download size={18} /> 匯出 ICS
+                </button>
+              </div>
+            </div>
 
-                <div className="space-y-4">
-                  {day.blocks?.map((b) => {
-                    const meta = typeMeta[b.type];
-                    const Icon = meta.icon;
+            {result.days?.map((day, dayIndex) => {
+              const conflicts = detectConflicts(day);
 
-                    const hasOptions =
-                      (b.type === "spot" || b.type === "meal" || b.type === "hotel") && b.options?.length;
+              return (
+                <div key={day.day} className="bg-white rounded-3xl p-8 shadow-md border border-slate-100">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+                    <div className="flex items-center gap-3">
+                      <span className="bg-blue-600 text-white px-4 py-1 rounded-full font-black text-sm">
+                        DAY {day.day}
+                      </span>
+                      {conflicts.size > 0 && (
+                        <span className="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-50 border border-red-200 text-red-700 font-black text-sm">
+                          <AlertTriangle size={16} /> 有 {conflicts.size} 個時間問題
+                        </span>
+                      )}
+                    </div>
 
-                    const selected =
-                      hasOptions ? b.options!.find((o) => o.label === (b.selectedOption ?? "A")) : null;
+                    <button
+                      type="button"
+                      onClick={() => reflowDay(dayIndex)}
+                      disabled={!!reflowing}
+                      className="px-4 py-3 rounded-2xl bg-slate-900 text-white font-black inline-flex items-center gap-2 disabled:opacity-60"
+                      title="AI 重新整理動線與交通、補齊空檔、調整午餐時間"
+                    >
+                      <RefreshCw size={18} className={reflowing?.dayIndex === dayIndex ? "animate-spin" : ""} />
+                      {reflowing?.dayIndex === dayIndex ? "重排中..." : "重排這一天"}
+                    </button>
+                  </div>
 
-                    return (
-                      <div key={b.id} className={`rounded-2xl border p-4 ${meta.bg}`}>
-                        <div className="flex items-start gap-3">
-                          <div className={`shrink-0 w-10 h-10 rounded-2xl ${meta.chip} flex items-center justify-center`}>
-                            <Icon size={18} className="text-white" />
-                          </div>
+                  <div className="space-y-4">
+                    {day.blocks
+                      ?.slice()
+                      .sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart))
+                      .map((b) => {
+                        const meta = typeMeta[b.type];
+                        const Icon = meta.icon;
 
-                          <div className="flex-1">
-                            {/* top row */}
-                            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                              <div className="flex flex-col gap-2">
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
-                                    value={b.timeStart}
-                                    onChange={(e) => updateBlock(dayIndex, b.id, { timeStart: e.target.value })}
-                                  />
-                                  <span className="text-slate-400">—</span>
-                                  <input
-                                    className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
-                                    value={b.timeEnd}
-                                    onChange={(e) => updateBlock(dayIndex, b.id, { timeEnd: e.target.value })}
-                                  />
+                        const hasOptions =
+                          (b.type === "spot" || b.type === "meal" || b.type === "hotel") && b.options?.length;
 
-                                  <span className="ml-2 text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
-                                    <Pencil size={14} /> {meta.label}
-                                  </span>
+                        const selected =
+                          hasOptions ? b.options!.find((o) => o.label === (b.selectedOption ?? "A")) : null;
 
-                                  {b.type === "meal" && b.mealType && (
-                                    <span className="ml-2 px-2 py-1 rounded-full text-xs font-black bg-white border border-slate-200 text-slate-700">
-                                      {b.mealType === "lunch"
-                                        ? "午餐"
-                                        : b.mealType === "dinner"
-                                        ? "晚餐"
-                                        : b.mealType === "breakfast"
-                                        ? "早餐"
-                                        : "點心"}
-                                    </span>
-                                  )}
-                                </div>
+                        const conflictMsg = conflicts.get(b.id);
 
-                                <div className="flex items-center gap-2">
-                                  {b.source === "user" && (
-                                    <span className="px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white">
-                                      自訂
-                                    </span>
-                                  )}
-                                  {b.type === "move" && b.move?.mode && (
-                                    <span className="px-2 py-1 rounded-full text-xs font-black bg-slate-900 text-white inline-flex items-center gap-2">
-                                      {b.move.mode === "drive" ? <Car size={14} /> : <Bus size={14} />}
-                                      {b.move.mode === "drive" ? "自駕" : "大眾運輸"}
-                                      {typeof b.move.durationMin === "number" ? `・${b.move.durationMin} 分` : ""}
-                                    </span>
-                                  )}
-                                </div>
+                        return (
+                          <div key={b.id} className={`rounded-2xl border p-4 ${meta.bg}`}>
+                            <div className="flex items-start gap-3">
+                              <div className={`shrink-0 w-10 h-10 rounded-2xl ${meta.chip} flex items-center justify-center`}>
+                                <Icon size={18} className="text-white" />
                               </div>
 
-                              {/* actions + AB */}
-                              <div className="flex flex-wrap items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => addBlockAfter(dayIndex, b.id)}
-                                  className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black"
-                                  title="在下方新增"
-                                >
-                                  ➕
-                                </button>
+                              <div className="flex-1">
+                                {/* top row */}
+                                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                                  <div className="flex flex-col gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <input
+                                        className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
+                                        value={b.timeStart}
+                                        onChange={(e) => updateBlock(dayIndex, b.id, { timeStart: e.target.value })}
+                                      />
+                                      <span className="text-slate-400">—</span>
+                                      <input
+                                        className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
+                                        value={b.timeEnd}
+                                        onChange={(e) => updateBlock(dayIndex, b.id, { timeEnd: e.target.value })}
+                                      />
 
-                                <button
-                                  type="button"
-                                  onClick={() => deleteBlockWithRipple(dayIndex, b.id)}
-                                  className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black"
-                                  title="刪除並把後面往前移"
-                                >
-                                  🗑️
-                                </button>
-
-                                {hasOptions && selected && (
-                                  <>
-                                    <div className="inline-flex rounded-xl border border-slate-200 overflow-hidden bg-white">
-                                      <button
-                                        type="button"
-                                        onClick={() => switchOption(dayIndex, b.id, "A")}
-                                        className={`px-3 py-2 text-sm font-black ${
-                                          b.selectedOption === "A" ? "bg-slate-900 text-white" : "text-slate-700"
-                                        }`}
-                                      >
-                                        A
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => switchOption(dayIndex, b.id, "B")}
-                                        className={`px-3 py-2 text-sm font-black ${
-                                          b.selectedOption === "B" ? "bg-slate-900 text-white" : "text-slate-700"
-                                        }`}
-                                      >
-                                        B
-                                      </button>
-                                    </div>
-
-                                    <div className="px-3 py-2 rounded-xl bg-white border border-slate-200">
-                                      <div className="text-xs text-slate-500 font-bold">推薦指數</div>
-                                      <div className="font-black text-slate-900">
-                                        {selected.score} <span className="text-slate-400 text-sm">/100</span>{" "}
-                                        <span className="ml-2 text-xs text-slate-500 font-bold">
-                                          ({scoreLabel(selected.score)})
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* 四格資訊：更清楚的標籤 */}
-                            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
-                                <div className="text-xs font-black text-slate-500 mb-2">活動名稱</div>
-                                <input
-                                  className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none font-black text-slate-800"
-                                  value={b.title}
-                                  onChange={(e) => updateBlock(dayIndex, b.id, { title: e.target.value })}
-                                />
-                              </div>
-
-                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
-                                <div className="text-xs font-black text-slate-500 mb-2">地點 / 區域</div>
-                                <input
-                                  className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
-                                  value={b.place ?? ""}
-                                  onChange={(e) => updateBlock(dayIndex, b.id, { place: e.target.value })}
-                                />
-                              </div>
-
-                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
-                                <div className="text-xs font-black text-slate-500 mb-2">
-                                  小提醒（例如：排隊、人潮、親子、換乘）
-                                </div>
-                                <input
-                                  className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
-                                  value={b.note ?? ""}
-                                  onChange={(e) => updateBlock(dayIndex, b.id, { note: e.target.value })}
-                                />
-                              </div>
-
-                              <div className="bg-white rounded-2xl border border-slate-200 p-3">
-                                <div className="text-xs font-black text-slate-500 mb-2">
-                                  {b.type === "move" ? "到下一站預估時間" : hasOptions ? "推薦理由（A/B 各自不同）" : "補充資訊"}
-                                </div>
-
-                                {b.type === "move" && b.move ? (
-                                  <div className="text-sm text-slate-700">
-                                    {(b.move.mode === "drive" ? "自駕" : "大眾運輸") + " 約 "}
-                                    <span className="font-black">{b.move.durationMin}</span> 分鐘
-                                    {(b.move.from || b.move.to) ? (
-                                      <div className="text-xs text-slate-500 mt-1">
-                                        {b.move.from ? `從 ${b.move.from}` : ""}
-                                        {b.move.from && b.move.to ? " → " : ""}
-                                        {b.move.to ? `到 ${b.move.to}` : ""}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ) : hasOptions && selected ? (
-                                  <div className="text-sm text-slate-700 leading-relaxed">
-                                    {selected.reason}
-                                    {selected.source === "user" && (
-                                      <span className="ml-2 inline-block px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white"> 
-                                        使用者指定
+                                      <span className="ml-2 text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                        <Pencil size={14} /> {meta.label}
                                       </span>
+
+                                      {conflictMsg && (
+                                        <span className="ml-2 inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-red-50 border border-red-200 text-red-700 font-black text-sm">
+                                          <AlertTriangle size={16} /> {conflictMsg}
+                                        </span>
+                                      )}
+
+                                      {b.type === "meal" && b.mealType && (
+                                        <span className="ml-2 px-2 py-1 rounded-full text-xs font-black bg-white border border-slate-200 text-slate-700">
+                                          {b.mealType === "lunch"
+                                            ? "午餐"
+                                            : b.mealType === "dinner"
+                                            ? "晚餐"
+                                            : b.mealType === "breakfast"
+                                            ? "早餐"
+                                            : "點心"}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {b.source === "user" && (
+                                        <span className="px-2 py-1 rounded-full text-xs font-black bg-violet-600 text-white">
+                                          自訂
+                                        </span>
+                                      )}
+
+                                      {b.type === "move" && b.move?.mode && (
+                                        <span className="px-2 py-1 rounded-full text-xs font-black bg-slate-900 text-white inline-flex items-center gap-2">
+                                          {b.move.mode === "drive" ? <Car size={14} /> : <Bus size={14} />}
+                                          {b.move.mode === "drive" ? "自駕" : "大眾運輸"}
+                                          {typeof b.move.durationMin === "number" ? `・${b.move.durationMin} 分` : ""}
+                                        </span>
+                                      )}
+
+                                      {b.type === "move" && b.move?.needsUpdate && (
+                                        <span className="px-2 py-1 rounded-full text-xs font-black bg-red-600 text-white">
+                                          交通需更新
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* actions + AB */}
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => openMap(b)}
+                                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black inline-flex items-center gap-2"
+                                      title="在 Google Maps 開啟"
+                                    >
+                                      <MapIcon size={16} /> 地圖
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => addBlockAfter(dayIndex, b.id)}
+                                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black"
+                                      title="在下方新增"
+                                    >
+                                      ➕
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => deleteBlockKeepGap(dayIndex, b.id)}
+                                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black"
+                                      title="刪除此活動，但保留時段空格"
+                                    >
+                                      <Trash2 size={18} />
+                                    </button>
+
+                                    {hasOptions && selected && (
+                                      <>
+                                        <div className="inline-flex rounded-xl border border-slate-200 overflow-hidden bg-white">
+                                          <button
+                                            type="button"
+                                            onClick={() => switchOption(dayIndex, b.id, "A")}
+                                            className={`px-3 py-2 text-sm font-black ${
+                                              b.selectedOption === "A" ? "bg-slate-900 text-white" : "text-slate-700"
+                                            }`}
+                                          >
+                                            A
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => switchOption(dayIndex, b.id, "B")}
+                                            className={`px-3 py-2 text-sm font-black ${
+                                              b.selectedOption === "B" ? "bg-slate-900 text-white" : "text-slate-700"
+                                            }`}
+                                          >
+                                            B
+                                          </button>
+                                        </div>
+
+                                        <div className="px-3 py-2 rounded-xl bg-white border border-slate-200">
+                                          <div className="text-xs text-slate-500 font-bold">推薦指數</div>
+                                          <div className="font-black text-slate-900">
+                                            {selected.score} <span className="text-slate-400 text-sm">/100</span>{" "}
+                                            <span className="ml-2 text-xs text-slate-500 font-bold">
+                                              ({scoreLabel(selected.score)})
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </>
                                     )}
                                   </div>
-                                ) : (
-                                  <div className="text-sm text-slate-500">—</div>
-                                )}
+                                </div>
+
+                                {/* 四格資訊：更清楚標籤 */}
+                                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                    <div className="text-xs font-black text-slate-500 mb-2">活動名稱</div>
+                                    <input
+                                      className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none font-black text-slate-800"
+                                      value={b.title}
+                                      onChange={(e) => updateBlock(dayIndex, b.id, { title: e.target.value })}
+                                    />
+                                  </div>
+
+                                  <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                    <div className="text-xs font-black text-slate-500 mb-2">地點 / 區域</div>
+                                    <input
+                                      className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
+                                      value={b.place ?? ""}
+                                      onChange={(e) => updateBlock(dayIndex, b.id, { place: e.target.value })}
+                                    />
+                                  </div>
+
+                                  <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                    <div className="text-xs font-black text-slate-500 mb-2">小提醒</div>
+                                    <input
+                                      className="w-full bg-slate-50 rounded-xl px-3 py-2 border border-slate-200 outline-none text-sm"
+                                      value={b.note ?? ""}
+                                      onChange={(e) => updateBlock(dayIndex, b.id, { note: e.target.value })}
+                                    />
+                                  </div>
+
+                                  <div className="bg-white rounded-2xl border border-slate-200 p-3">
+                                    <div className="text-xs font-black text-slate-500 mb-2">
+                                      {b.type === "move"
+                                        ? "到下一站預估時間"
+                                        : hasOptions
+                                        ? "推薦理由（A/B 各自不同）"
+                                        : "補充資訊"}
+                                    </div>
+
+                                    {b.type === "move" && b.move ? (
+                                      <div className="text-sm text-slate-700">
+                                        {(b.move.mode === "drive" ? "自駕" : "大眾運輸") + " 約 "}
+                                        <span className="font-black">{b.move.durationMin}</span> 分鐘
+                                        {(b.move.from || b.move.to) ? (
+                                          <div className="text-xs text-slate-500 mt-1">
+                                            {b.move.from ? `從 ${b.move.from}` : ""}
+                                            {b.move.from && b.move.to ? " → " : ""}
+                                            {b.move.to ? `到 ${b.move.to}` : ""}
+                                          </div>
+                                        ) : null}
+                                        {b.move.needsUpdate && (
+                                          <div className="text-xs text-red-600 font-black mt-2">
+                                            建議按「重排這一天」更新交通與動線
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : hasOptions && selected ? (
+                                      <div className="text-sm text-slate-700 leading-relaxed">{selected.reason}</div>
+                                    ) : (
+                                      <div className="text-sm text-slate-500">—</div>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        );
+                      })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
