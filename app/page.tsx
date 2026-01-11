@@ -46,7 +46,7 @@ type MoveMeta = {
   durationMin: number;
   from?: string;
   to?: string;
-  needsUpdate?: boolean; // ✅ 刪除保留空格時，交通可能需要更新
+  needsUpdate?: boolean;
 };
 
 type ItineraryBlock = {
@@ -113,7 +113,7 @@ const toHHMM = (min: number) => {
   return `${hh}:${mm}`;
 };
 
-// ✅ 時間吸附：預設 5 分鐘
+// ✅ 吸附：只在 onBlur/normalize 時使用，避免使用者輸入時跳動
 const snapMinutes = (hhmm: string, step = 5) => {
   if (!/^\d{2}:\d{2}$/.test(hhmm)) return hhmm;
   const m = toMin(hhmm);
@@ -121,20 +121,44 @@ const snapMinutes = (hhmm: string, step = 5) => {
   return toHHMM(snapped);
 };
 
-// ✅ 取得地圖查詢字串（place 優先，否則 title）
-const mapQuery = (b: ItineraryBlock) => {
-  const q = (b.place?.trim() || b.title?.trim() || "").trim();
-  return q;
+// ✅ 更準地圖 query：place/title + 旅遊地點
+const mapQuery = (b: ItineraryBlock, tripLocation: string) => {
+  const place = (b.place ?? "").trim();
+  const title = (b.title ?? "").trim();
+  const loc = (tripLocation ?? "").trim();
+
+  if (place && loc) return `${place} ${loc}`;
+  if (place) return place;
+  if (title && loc) return `${title} ${loc}`;
+  if (title) return title;
+  return loc;
 };
 
-const openMap = (b: ItineraryBlock) => {
-  const q = mapQuery(b);
-  if (!q) return;
-  const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
-  window.open(url, "_blank", "noopener,noreferrer");
+// ✅ 一天一條 Google Maps 路線（origin/destination/waypoints）
+const buildDayDirectionsUrl = (day: ItineraryDay, tripLocation: string, travelmode: "driving" | "transit") => {
+  const stops = day.blocks
+    .filter((b) => ["arrival", "spot", "meal", "hotel"].includes(b.type))
+    .map((b) => mapQuery(b, tripLocation))
+    .filter(Boolean);
+
+  if (stops.length < 2) return "";
+
+  const origin = stops[0];
+  const destination = stops[stops.length - 1];
+  const waypoints = stops.slice(1, -1).slice(0, 20);
+
+  const params = new URLSearchParams({
+    api: "1",
+    origin,
+    destination,
+    travelmode,
+  });
+  if (waypoints.length) params.set("waypoints", waypoints.join("|"));
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
 };
 
-// ✅ 產 CSV 下載（簡單版）
+// ✅ CSV 匯出
 const downloadCSV = (it: Itinerary) => {
   const rows: string[][] = [["Day", "Start", "End", "Type", "Title", "Place", "Note"]];
   it.days.forEach((d) => {
@@ -142,24 +166,12 @@ const downloadCSV = (it: Itinerary) => {
       .slice()
       .sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart))
       .forEach((b) => {
-        rows.push([
-          String(d.day),
-          b.timeStart,
-          b.timeEnd,
-          b.type,
-          b.title ?? "",
-          b.place ?? "",
-          b.note ?? "",
-        ]);
+        rows.push([String(d.day), b.timeStart, b.timeEnd, b.type, b.title ?? "", b.place ?? "", b.note ?? ""]);
       });
   });
 
   const csv = rows
-    .map((r) =>
-      r
-        .map((cell) => `"${String(cell).replaceAll(`"`, `""`)}"`)
-        .join(",")
-    )
+    .map((r) => r.map((cell) => `"${String(cell).replaceAll(`"`, `""`)}"`).join(","))
     .join("\n");
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -170,16 +182,13 @@ const downloadCSV = (it: Itinerary) => {
   URL.revokeObjectURL(a.href);
 };
 
-// ✅ 產 ICS 下載（簡單：用「今天」當日期基準 + Day offset）
-// 你之後可加「出發日期」讓它更準
+// ✅ ICS 匯出（以今天當 Day1 日期基準）
 const downloadICS = (it: Itinerary) => {
   const pad = (n: number) => String(n).padStart(2, "0");
-
   const now = new Date();
   const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
 
   const toICSDateTime = (date: Date) => {
-    // 以 local time 直接輸出（不轉 UTC，簡化；Google Calendar 通常可解析）
     const y = date.getFullYear();
     const mo = pad(date.getMonth() + 1);
     const d = pad(date.getDate());
@@ -214,8 +223,7 @@ const downloadICS = (it: Itinerary) => {
         dtEnd.setHours(eh, em, 0, 0);
 
         const uid = `${b.id}-${day.day}@ai-itinerary`;
-
-        const summary = b.title?.replace(/\n/g, " ") || "Event";
+        const summary = (b.title || "Event").replace(/\n/g, " ");
         const location = (b.place || "").replace(/\n/g, " ");
         const description = (b.note || "").replace(/\n/g, " ");
 
@@ -241,7 +249,7 @@ const downloadICS = (it: Itinerary) => {
   URL.revokeObjectURL(a.href);
 };
 
-// ✅ 檢查時間衝突：回傳 blockId -> message
+// ✅ 衝突檢查
 const detectConflicts = (day: ItineraryDay) => {
   const sorted = day.blocks.slice().sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
   const conflicts = new Map<string, string>();
@@ -255,15 +263,14 @@ const detectConflicts = (day: ItineraryDay) => {
 
     if (i > 0) {
       const prev = sorted[i - 1];
-      const ps = toMin(prev.timeStart);
       const pe = toMin(prev.timeEnd);
       if (s < pe) {
         conflicts.set(b.id, "與上一段時間重疊");
         conflicts.set(prev.id, conflicts.get(prev.id) || "與下一段時間重疊");
       }
-      // 檢查是否有空洞（不是錯誤，只提示）
     }
   }
+
   return conflicts;
 };
 
@@ -305,9 +312,17 @@ export default function Home() {
     return true;
   }, [form]);
 
+  const openMap = (b: ItineraryBlock) => {
+    const q = mapQuery(b, form.location);
+    if (!q) return;
+    const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   const normalizeItinerary = (parsed: Itinerary) => {
     parsed.days?.forEach((d) => {
       d.blocks?.forEach((b) => {
+        // 把 selectedOption 的內容同步到 block（方便 UI 直接顯示）
         if ((b.type === "spot" || b.type === "meal" || b.type === "hotel") && b.options?.length) {
           const pick = b.selectedOption ?? "A";
           const opt = b.options.find((o) => o.label === pick) ?? b.options[0];
@@ -316,7 +331,8 @@ export default function Home() {
           b.place = opt.place;
           b.note = opt.note;
         }
-        // ✅ 時間吸附（保底：只做 normalize 時做一次）
+
+        // AI 生成後的時間吸附一下（使用者輸入不會被即時吸附）
         b.timeStart = snapMinutes(b.timeStart, 5);
         b.timeEnd = snapMinutes(b.timeEnd, 5);
       });
@@ -370,12 +386,7 @@ export default function Home() {
       const idx = day.blocks.findIndex((b) => b.id === blockId);
       if (idx === -1) return prev;
 
-      // ✅ 時間吸附：若在更新 timeStart/timeEnd，就吸附到 5 分鐘刻度
-      const p = { ...patch } as any;
-      if (typeof p.timeStart === "string") p.timeStart = snapMinutes(p.timeStart, 5);
-      if (typeof p.timeEnd === "string") p.timeEnd = snapMinutes(p.timeEnd, 5);
-
-      day.blocks[idx] = { ...day.blocks[idx], ...p };
+      day.blocks[idx] = { ...day.blocks[idx], ...patch };
       day.blocks = [...day.blocks].sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart));
       return next;
     });
@@ -395,6 +406,7 @@ export default function Home() {
       const opt = b.options.find((o) => o.label === to);
       if (!opt) return prev;
 
+      // ✅ AB 切換：更新 block 的 title/place/note，地圖會跟著變
       b.selectedOption = to;
       b.title = opt.title;
       b.place = opt.place;
@@ -404,7 +416,7 @@ export default function Home() {
     });
   };
 
-  // ✅ 刪除 = 保留原時段空格（占位），後面不動
+  // ✅ 刪除 = 保留空格（不動後面）
   const deleteBlockKeepGap = (dayIndex: number, blockId: string) => {
     setResult((prev) => {
       if (!prev) return prev;
@@ -416,7 +428,6 @@ export default function Home() {
 
       const target = day.blocks[idx];
 
-      // 把該 block 轉為 free 占位，不改時間
       day.blocks[idx] = {
         ...target,
         type: "free",
@@ -429,7 +440,7 @@ export default function Home() {
         mealType: undefined,
       };
 
-      // 相鄰 move 標記 needsUpdate（時間保留）
+      // 相鄰交通標記需更新（但時間不動）
       const markMove = (pos: number) => {
         if (pos >= 0 && pos < day.blocks.length && day.blocks[pos].type === "move") {
           day.blocks[pos].move = { ...(day.blocks[pos].move ?? { mode: form.transport, durationMin: 10 }), needsUpdate: true };
@@ -446,7 +457,7 @@ export default function Home() {
     });
   };
 
-  // ✅ 新增：在某 block 後插入一個 60 分鐘 free（自訂）
+  // ✅ 插入一段空檔（60 分）
   const addBlockAfter = (dayIndex: number, afterBlockId: string) => {
     setResult((prev) => {
       if (!prev) return prev;
@@ -525,13 +536,18 @@ export default function Home() {
     );
   };
 
-  // ✅ 一鍵重排這一天（呼叫新 API）
+  // ✅ 重排單日（呼叫 /api/reflow-day）
   const reflowDay = async (dayIndex: number) => {
     if (!result) return;
+    const day = result.days?.[dayIndex];
+
+    if (!day?.blocks || !Array.isArray(day.blocks)) {
+      alert("目前行程資料不是新版（缺少 blocks）。請先重新按「生成可編輯行程表」再重排。");
+      return;
+    }
+
     setReflowing({ dayIndex });
     try {
-      const day = result.days[dayIndex];
-
       const resp = await fetch("/api/reflow-day", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -561,11 +577,13 @@ export default function Home() {
         const next = structuredClone(prev);
         next.days[dayIndex] = {
           ...newDay,
-          blocks: (newDay.blocks ?? []).map((b) => ({
-            ...b,
-            timeStart: snapMinutes(b.timeStart, 5),
-            timeEnd: snapMinutes(b.timeEnd, 5),
-          })),
+          blocks: (newDay.blocks ?? [])
+            .map((b) => ({
+              ...b,
+              timeStart: snapMinutes(b.timeStart, 5),
+              timeEnd: snapMinutes(b.timeEnd, 5),
+            }))
+            .sort((a, b) => toMin(a.timeStart) - toMin(b.timeStart)),
         };
         return next;
       });
@@ -581,7 +599,7 @@ export default function Home() {
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-10">
           <h1 className="text-4xl font-black text-slate-900 mb-2">專業 AI 旅程助手</h1>
-          <p className="text-slate-500">刪除保留空格 + 時間吸附 + 衝突警示 + 匯出 + 地圖 + 一鍵重排</p>
+          <p className="text-slate-500">地圖更準 / AB 切換即時更新 / move 地圖禁用 / 時間吸附改 onBlur / 每天一鍵地圖路線</p>
         </div>
 
         {/* 表單 */}
@@ -626,14 +644,14 @@ export default function Home() {
                   />
                 </div>
               </div>
-              <p className="text-xs text-slate-400 mt-2">午餐會盡量安排在 11:30–12:30 開始（若偏離會在小提醒說明）。</p>
+              <p className="text-xs text-slate-400 mt-2">午餐會盡量安排在 11:30–12:30 開始；時間會在「離開欄位」時對齊 5 分鐘。</p>
             </div>
 
             {/* 節奏 */}
             <div className="md:col-span-2">
               <label className="block text-sm font-bold text-slate-700 mb-2">旅遊節奏</label>
               <div className="flex gap-3">
-                {paceButton("packed", "趕", "景點多、動線緊、停留短")}
+                {paceButton("packed", "趕", "景點多、動線緊")}
                 {paceButton("normal", "一般", "平衡安排")}
                 {paceButton("relaxed", "悠閑", "留白多、慢慢玩")}
               </div>
@@ -853,6 +871,11 @@ export default function Home() {
 
             {result.days?.map((day, dayIndex) => {
               const conflicts = detectConflicts(day);
+              const dayMapUrl = buildDayDirectionsUrl(
+                day,
+                form.location,
+                form.transport === "drive" ? "driving" : "transit"
+              );
 
               return (
                 <div key={day.day} className="bg-white rounded-3xl p-8 shadow-md border border-slate-100">
@@ -868,16 +891,32 @@ export default function Home() {
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => reflowDay(dayIndex)}
-                      disabled={!!reflowing}
-                      className="px-4 py-3 rounded-2xl bg-slate-900 text-white font-black inline-flex items-center gap-2 disabled:opacity-60"
-                      title="AI 重新整理動線與交通、補齊空檔、調整午餐時間"
-                    >
-                      <RefreshCw size={18} className={reflowing?.dayIndex === dayIndex ? "animate-spin" : ""} />
-                      {reflowing?.dayIndex === dayIndex ? "重排中..." : "重排這一天"}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={!dayMapUrl}
+                        onClick={() => dayMapUrl && window.open(dayMapUrl, "_blank", "noopener,noreferrer")}
+                        className={`px-4 py-3 rounded-2xl font-black inline-flex items-center gap-2 ${
+                          dayMapUrl
+                            ? "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                            : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                        }`}
+                        title="用 Google 地圖把當天景點串成路線"
+                      >
+                        <MapIcon size={18} /> Google 地圖路線
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => reflowDay(dayIndex)}
+                        disabled={!!reflowing}
+                        className="px-4 py-3 rounded-2xl bg-slate-900 text-white font-black inline-flex items-center gap-2 disabled:opacity-60"
+                        title="AI 重新整理動線與交通、補齊空檔、調整午餐時間"
+                      >
+                        <RefreshCw size={18} className={reflowing?.dayIndex === dayIndex ? "animate-spin" : ""} />
+                        {reflowing?.dayIndex === dayIndex ? "重排中..." : "重排這一天"}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-4">
@@ -895,6 +934,7 @@ export default function Home() {
                           hasOptions ? b.options!.find((o) => o.label === (b.selectedOption ?? "A")) : null;
 
                         const conflictMsg = conflicts.get(b.id);
+                        const mapDisabled = b.type === "move";
 
                         return (
                           <div key={b.id} className={`rounded-2xl border p-4 ${meta.bg}`}>
@@ -904,7 +944,6 @@ export default function Home() {
                               </div>
 
                               <div className="flex-1">
-                                {/* top row */}
                                 <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                                   <div className="flex flex-col gap-2">
                                     <div className="flex flex-wrap items-center gap-2">
@@ -912,12 +951,14 @@ export default function Home() {
                                         className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
                                         value={b.timeStart}
                                         onChange={(e) => updateBlock(dayIndex, b.id, { timeStart: e.target.value })}
+                                        onBlur={(e) => updateBlock(dayIndex, b.id, { timeStart: snapMinutes(e.target.value, 5) })}
                                       />
                                       <span className="text-slate-400">—</span>
                                       <input
                                         className="w-24 bg-white rounded-xl px-3 py-2 border border-slate-200 outline-none font-mono text-sm"
                                         value={b.timeEnd}
                                         onChange={(e) => updateBlock(dayIndex, b.id, { timeEnd: e.target.value })}
+                                        onBlur={(e) => updateBlock(dayIndex, b.id, { timeEnd: snapMinutes(e.target.value, 5) })}
                                       />
 
                                       <span className="ml-2 text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
@@ -966,13 +1007,18 @@ export default function Home() {
                                     </div>
                                   </div>
 
-                                  {/* actions + AB */}
                                   <div className="flex flex-wrap items-center gap-2">
+                                    {/* 地圖：move 反灰無作用 */}
                                     <button
                                       type="button"
-                                      onClick={() => openMap(b)}
-                                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black inline-flex items-center gap-2"
-                                      title="在 Google Maps 開啟"
+                                      onClick={() => !mapDisabled && openMap(b)}
+                                      disabled={mapDisabled}
+                                      className={`px-3 py-2 rounded-xl border font-black inline-flex items-center gap-2 ${
+                                        mapDisabled
+                                          ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                                      }`}
+                                      title={mapDisabled ? "交通段不提供地圖" : "在 Google Maps 開啟"}
                                     >
                                       <MapIcon size={16} /> 地圖
                                     </button>
@@ -981,7 +1027,7 @@ export default function Home() {
                                       type="button"
                                       onClick={() => addBlockAfter(dayIndex, b.id)}
                                       className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 font-black"
-                                      title="在下方新增"
+                                      title="在下方新增空檔"
                                     >
                                       ➕
                                     </button>
@@ -1032,7 +1078,7 @@ export default function Home() {
                                   </div>
                                 </div>
 
-                                {/* 四格資訊：更清楚標籤 */}
+                                {/* 四格資訊 */}
                                 <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                                   <div className="bg-white rounded-2xl border border-slate-200 p-3">
                                     <div className="text-xs font-black text-slate-500 mb-2">活動名稱</div>
@@ -1063,11 +1109,7 @@ export default function Home() {
 
                                   <div className="bg-white rounded-2xl border border-slate-200 p-3">
                                     <div className="text-xs font-black text-slate-500 mb-2">
-                                      {b.type === "move"
-                                        ? "到下一站預估時間"
-                                        : hasOptions
-                                        ? "推薦理由（A/B 各自不同）"
-                                        : "補充資訊"}
+                                      {b.type === "move" ? "到下一站預估時間" : hasOptions ? "推薦理由（A/B 各自不同）" : "補充資訊"}
                                     </div>
 
                                     {b.type === "move" && b.move ? (
